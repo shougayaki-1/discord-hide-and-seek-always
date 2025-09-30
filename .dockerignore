@@ -1,0 +1,11 @@
+# Node.js
+node_modules
+npm-debug.log
+
+# Secret Files
+config.json
+google-credentials.json
+
+# OS specific
+.DS_Store
+Thumbs.db

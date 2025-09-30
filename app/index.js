@@ -1,3 +1,6 @@
+// このパスは start.sh で指定したパスと一致させる
+const creds = require('/usr/src/app/secrets/google-credentials.json');
+
 // discord.jsライブラリ
 const {
   Client, GatewayIntentBits, Partials, REST, Routes, EmbedBuilder,
@@ -20,6 +23,7 @@ const serviceAccountAuth = new JWT({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 const doc = new GoogleSpreadsheet(spreadsheetId, serviceAccountAuth);
+
 
 
 // --- Discordボット本体の作成 ---

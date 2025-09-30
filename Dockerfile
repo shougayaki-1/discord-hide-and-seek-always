@@ -36,5 +36,8 @@ COPY start.sh ./start.sh
 # start.shに実行権限を付与
 RUN chmod +x ./start.sh
 
+# KoyebがPORT環境変数で指定するポートを開放する
+EXPOSE 8000
+
 # start.sh を実行してコンテナを起動
 CMD ["./start.sh"]

@@ -502,3 +502,24 @@ function findTeamIdByMember(memberId, role) {
 
 // --- ボットをDiscordにログインさせる ---
 client.login(token);
+
+// --- Koyeb ヘルスチェック用の軽量Webサーバー ---
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+  // Discordクライアントが正常に接続しているか（ログイン済みか）をチェック
+  if (client.isReady()) {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is ready.\n');
+  } else {
+    // Botがまだ準備できていない、または切断された場合はエラーを返す
+    res.writeHead(503, { 'Content-Type': 'text/plain' });
+    res.end('Bot is not ready.\n');
+  }
+});
+
+// KoyebはPORT環境変数を自動で設定してくれる
+const port = process.env.PORT || 8000;
+server.listen(port, () => {
+  console.log(`Health check server listening on port ${port}`);
+});

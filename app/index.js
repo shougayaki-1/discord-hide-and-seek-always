@@ -14,7 +14,6 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 // 設定ファイルと認証情報
 const { clientId, token, spreadsheetId } = require('./config.json');
-const creds = require('./google-credentials.json');
 
 // --- Google Sheets API セットアップ ---
 const serviceAccountAuth = new JWT({

@@ -7,28 +7,31 @@ FROM node:22 AS builder
 # 作業ディレクトリを /app に設定
 WORKDIR /app
 
-# appフォルダ内のpackage.jsonとpackage-lock.jsonを先にコピー
-COPY package*.json ./
+# app/ 内の package.json をコピーして依存をインストール
+# リポジトリのルートではなく app ディレクトリ配下に package.json がある構成に対応
+COPY app/package*.json ./
 
 # 依存関係をクリーンインストール
 RUN npm ci
 
-# appフォルダ内のすべてのソースコードをコピー
-COPY . .
+# app ディレクトリ以下のソースを /app にコピー
+COPY app/ ./
 
 # -------------------------
 # 2. 実行環境のステージ (実際に動かす用)
 # -------------------------
+
 FROM node:22-alpine
 
 # 作業ディレクトリを /app に設定
 WORKDIR /app
 
-# ビルドステージから、インストール済みのnode_modulesとソースコードをコピー
+# ビルドステージから、インストール済み node_modules と必要ファイルをコピー
+# 注意: セキュリティ上の理由で secrets（例: config.json / google-credentials.json）は .dockerignore により除外される想定です。
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/index.js ./index.js
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/start.sh ./start.sh
+COPY start.sh ./start.sh
 
 # start.shに実行権限を付与
 RUN chmod +x ./start.sh

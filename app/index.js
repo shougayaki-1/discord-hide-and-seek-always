@@ -12,8 +12,10 @@ const {
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
-// 設定ファイルと認証情報
-const { clientId, token, spreadsheetId } = require('./config.json');
+// ★ 環境変数から設定を読み込む
+const clientId = process.env.DISCORD_CLIENT_ID;
+const token = process.env.DISCORD_TOKEN;
+const spreadsheetId = process.env.SPREADSHEET_ID;
 
 // --- Google Sheets API セットアップ ---
 const serviceAccountAuth = new JWT({

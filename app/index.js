@@ -240,15 +240,27 @@ async function handleSlashCommand(interaction) {
     await sendControlPanel(interaction.channel);
   }
 
-  if (commandName === 'game-end') {
-    if (gameStatus.phase !== 'playing' && gameStatus.phase !== 'ready') {
-      return interaction.reply({ content: '現在ゲームは行われていません。', ephemeral: true });
+if (commandName === 'game-end') {
+    // 待機中(idle)以外なら、何かしらのアクションが進行中
+    if (gameStatus.phase === 'idle') {
+      return interaction.reply({ content: '現在、アクティブなゲームや募集はありません。', ephemeral: true });
     }
+
+    // 権限チェック (変更なし)
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator) && interaction.user.id !== gameStatus.gameMasterId) {
-      return interaction.reply({ content: 'ゲームを終了できるのは、サーバー管理者またはゲームを開始した本人だけです。', ephemeral: true });
+      return interaction.reply({ content: 'アクションを終了できるのは、サーバー管理者またはゲームを開始した本人だけです。', ephemeral: true });
     }
-    await interaction.reply('ゲームを強制終了します...');
-    await endGame(interaction.guild, interaction.channel, 'ゲームマスターによりゲームが強制終了されました。');
+
+    // フェーズに応じて処理を分岐
+    if (gameStatus.phase === 'recruiting') {
+      await interaction.reply('募集をキャンセルします...');
+      // 募集メッセージを取得してendGame関数に渡す
+      const recruitmentMessage = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
+      await endGame(interaction.guild, interaction.channel, 'ゲームマスターにより募集がキャンセルされました。', recruitmentMessage);
+    } else { // 'ready' または 'playing' の場合
+      await interaction.reply('ゲームを強制終了します...');
+      await endGame(interaction.guild, interaction.channel, 'ゲームマスターによりゲームが強制終了されました。');
+    }
   }
 }
 
@@ -432,11 +444,26 @@ async function updateRecruitmentMessage(message) {
   } catch(error) { console.error("募集メッセージの更新に失敗:", error); }
 }
 
-async function endGame(guild, channel, reason) {
+async function endGame(guild, channel, reason, recruitmentMessage = null) {
   if (gameStatus.phase === 'idle') return;
-  const wasPlaying = gameStatus.phase === 'playing';
+  
+  // ★ 募集中のゲームをキャンセルした場合の処理を追加
+  if (recruitmentMessage) {
+    const canceledEmbed = new EmbedBuilder()
+      .setColor(0x808080) // グレー
+      .setTitle('募集キャンセル')
+      .setDescription('このゲームの募集はゲームマスターによってキャンセルされました。');
+    // メッセージを編集し、リアクションを全削除
+    await recruitmentMessage.edit({ embeds: [canceledEmbed], components: [] });
+    await recruitmentMessage.reactions.removeAll().catch(err => console.error('リアクションの削除に失敗:', err));
+  }
+
+  // ★ phaseがrecruitingの時はwasPlayingがfalseになるように調整
+  const wasPlaying = (gameStatus.phase === 'playing');
+  
+  // (以降の処理はほぼ変更なし)
   gameStatus.phase = 'idle';
-  console.log('ゲームを終了します...');
+  console.log('ゲーム/募集を終了します...');
 
   if (gameStatus.gameTimer) clearTimeout(gameStatus.gameTimer);
   if (gameStatus.mission.timer) clearTimeout(gameStatus.mission.timer);

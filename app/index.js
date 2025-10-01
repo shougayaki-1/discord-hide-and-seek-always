@@ -1,5 +1,6 @@
-// このパスは start.sh で指定したパスと一致させる
-const creds = require('/usr/src/app/secrets/google-credentials.json');
+// ---------------------------------------------
+// ステップ1: 必要なライブラリをすべて読み込む
+// ---------------------------------------------
 
 // discord.jsライブラリ
 const {
@@ -12,10 +13,27 @@ const {
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
+// ヘルスチェック用Webサーバーライブラリ
+const http = require('http');
+
+
+// ---------------------------------------------
+// ステップ2: 設定値や認証情報を読み込む
+// ---------------------------------------------
+
 // ★ 環境変数から設定を読み込む
 const clientId = process.env.DISCORD_CLIENT_ID;
 const token = process.env.DISCORD_TOKEN;
 const spreadsheetId = process.env.SPREADSHEET_ID;
+
+// ★ start.sh によって作成される認証情報ファイルを読み込む
+// このパスは start.sh で指定したパスと一致させる
+const creds = require('/app/secrets/google-credentials.json');
+
+
+// ---------------------------------------------
+// ステップ3: 読み込んだ設定値を使ってセットアップ
+// ---------------------------------------------
 
 // --- Google Sheets API セットアップ ---
 const serviceAccountAuth = new JWT({
@@ -24,8 +42,6 @@ const serviceAccountAuth = new JWT({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 const doc = new GoogleSpreadsheet(spreadsheetId, serviceAccountAuth);
-
-
 
 // --- Discordボット本体の作成 ---
 const client = new Client({
@@ -39,6 +55,10 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
+
+// ---------------------------------------------
+// ステップ4: Botのロジックを記述
+// ---------------------------------------------
 
 // --- ゲームの状態を管理する変数 ---
 let gameStatus = {
@@ -61,7 +81,6 @@ let gameStatus = {
     timer: null,
     interval: 3,
   },
-  // ★ コマンドが実行されたチャンネルIDを保存
   gameChannelId: null,
   createdChannelIds: [],
   categoryChannelId: null,
@@ -96,7 +115,7 @@ const commands = [
       { name: 'mission-interval-max', description: 'ミッション発令の最大間隔（分） (デフォルト: 15分)', type: ApplicationCommandOptionType.Integer, required: false, minValue: 1 },
     ],
   },
-  { name: 'game-end', description: '現在のゲームを強制終了します。（管理者/ゲームマスター専用）' },
+  { name: 'game-end', description: '現在のゲームや募集を強制終了します。（管理者/ゲームマスター専用）' },
 ];
 
 
@@ -144,7 +163,6 @@ async function handleSlashCommand(interaction) {
   }
 
   if (commandName === 'game-recruit') {
-    // (変更なし)
     if (gameStatus.phase !== 'idle') {
       return interaction.reply({ content: '現在、他のゲームが進行中または募集中です。', ephemeral: true });
     }
@@ -235,29 +253,30 @@ async function handleSlashCommand(interaction) {
     gameStatus.phase = 'ready';
     gameStatus.gameMasterId = interaction.user.id;
     gameStatus.timeLimit = interaction.options.getInteger('time-limit');
-    // ★ チャンネルIDを保存
     gameStatus.gameChannelId = interaction.channelId;
     await sendControlPanel(interaction.channel);
   }
 
-if (commandName === 'game-end') {
-    // 待機中(idle)以外なら、何かしらのアクションが進行中
+  if (commandName === 'game-end') {
     if (gameStatus.phase === 'idle') {
       return interaction.reply({ content: '現在、アクティブなゲームや募集はありません。', ephemeral: true });
     }
 
-    // 権限チェック (変更なし)
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator) && interaction.user.id !== gameStatus.gameMasterId) {
-      return interaction.reply({ content: 'アクションを終了できるのは、サーバー管理者またはゲームを開始した本人だけです。', ephemeral: true });
+    if (gameStatus.phase === 'recruiting') {
+        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return interaction.reply({ content: '募集をキャンセルできるのはサーバー管理者だけです。', ephemeral: true });
+        }
+    } else {
+        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator) && interaction.user.id !== gameStatus.gameMasterId) {
+            return interaction.reply({ content: 'アクションを終了できるのは、サーバー管理者またはゲームを開始した本人だけです。', ephemeral: true });
+        }
     }
 
-    // フェーズに応じて処理を分岐
     if (gameStatus.phase === 'recruiting') {
       await interaction.reply('募集をキャンセルします...');
-      // 募集メッセージを取得してendGame関数に渡す
       const recruitmentMessage = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
       await endGame(interaction.guild, interaction.channel, 'ゲームマスターにより募集がキャンセルされました。', recruitmentMessage);
-    } else { // 'ready' または 'playing' の場合
+    } else {
       await interaction.reply('ゲームを強制終了します...');
       await endGame(interaction.guild, interaction.channel, 'ゲームマスターによりゲームが強制終了されました。');
     }
@@ -296,7 +315,6 @@ async function handleButton(interaction) {
   }
 
   if (customId === 'catch_button') {
-    // (変更なし)
     if (gameStatus.phase !== 'playing') {
       return interaction.reply({ content: 'ゲームが開始されていません。', ephemeral: true });
     }
@@ -308,6 +326,7 @@ async function handleButton(interaction) {
     if (allRunners.length === 0) {
       return interaction.reply({ content: '捕獲対象の逃走者がいません。', ephemeral: true });
     }
+
     const selectMenu = new StringSelectMenuBuilder().setCustomId('catch_select_menu').setPlaceholder('捕まえた逃走者を選択').addOptions(allRunners.map(rId => { const m = interaction.guild.members.cache.get(rId); return { label: m ? m.displayName : `不明 (${rId})`, value: rId }; }));
     const row = new ActionRowBuilder().addComponents(selectMenu);
     await interaction.reply({ content: '誰を捕まえましたか？', components: [row], ephemeral: true });
@@ -316,7 +335,6 @@ async function handleButton(interaction) {
 
 // --- ドロップダウンメニュー処理 ---
 async function handleSelectMenu(interaction) {
-  // (変更なし)
   if (interaction.customId === 'catch_select_menu') {
     const targetId = interaction.values[0];
     const target = await interaction.guild.members.fetch(targetId);
@@ -377,7 +395,6 @@ async function issueMission(guild) {
 
     const missionEmbed = new EmbedBuilder().setColor(0xFFA500).setTitle('🚨 緊急ミッション発令！ 🚨').setDescription(missionContent).addFields({ name: '達成報酬', value: `${missionPoints} ポイント` }).setFooter({ text: '達成はゲームマスターに口頭で報告してください。' });
     
-    // ★ 保存したチャンネルIDのチャンネルに送信
     if (gameStatus.gameChannelId) {
         const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
         if (mainChannel) {
@@ -402,7 +419,6 @@ function startPhotoRemindTimer(guild) {
 
     const remindEmbed = new EmbedBuilder().setColor(0xADD8E6).setTitle('📸 写真提出リマインド 📸').setDescription('現在地のヒントとなる写真を、いずれかのチャンネルに投稿してください！');
     
-    // ★ 保存したチャンネルIDのチャンネルに送信
     if (gameStatus.gameChannelId) {
         const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
         if (mainChannel) {
@@ -414,7 +430,6 @@ function startPhotoRemindTimer(guild) {
 }
 
 async function createTeamChannels(guild) {
-  // (変更なし)
   const category = await guild.channels.create({ name: '👹リアル鬼ごっこ', type: ChannelType.GuildCategory });
   gameStatus.categoryChannelId = category.id;
   const allTeams = [...gameStatus.teams.oni.map((t, i) => ({ n: `鬼チーム-${i + 1}`, m: t })), ...gameStatus.teams.runner.map((t, i) => ({ n: `逃走者チーム-${i + 1}`, m: t }))];
@@ -427,7 +442,6 @@ async function createTeamChannels(guild) {
 }
 
 async function sendControlPanel(channel) {
-  // (変更なし)
   const embed = new EmbedBuilder().setColor(0x5865F2).setTitle('ゲームコントロールパネル').setDescription('ここからゲームの操作ができます。');
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('start_game_button').setLabel('▶️ ゲーム開始').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId('catch_button').setLabel('🤚 捕獲報告').setStyle(ButtonStyle.Primary));
   const sentMessage = await channel.send({ embeds: [embed], components: [row] });
@@ -435,7 +449,6 @@ async function sendControlPanel(channel) {
 }
 
 async function updateRecruitmentMessage(message) {
-  // (変更なし)
   try {
     await message.fetch(); const originalEmbed = message.embeds[0]; if (!originalEmbed) return;
     let pList = 'まだいません'; if (gameStatus.participants.size > 0) { pList = Array.from(gameStatus.participants).map(uId => `<@${uId}>`).join('\n'); }
@@ -446,22 +459,15 @@ async function updateRecruitmentMessage(message) {
 
 async function endGame(guild, channel, reason, recruitmentMessage = null) {
   if (gameStatus.phase === 'idle') return;
-  
-  // ★ 募集中のゲームをキャンセルした場合の処理を追加
+
   if (recruitmentMessage) {
-    const canceledEmbed = new EmbedBuilder()
-      .setColor(0x808080) // グレー
-      .setTitle('募集キャンセル')
-      .setDescription('このゲームの募集はゲームマスターによってキャンセルされました。');
-    // メッセージを編集し、リアクションを全削除
-    await recruitmentMessage.edit({ embeds: [canceledEmbed], components: [] });
+    const canceledEmbed = new EmbedBuilder().setColor(0x808080).setTitle('募集キャンセル').setDescription('このゲームの募集はキャンセルされました。');
+    await recruitmentMessage.edit({ embeds: [canceledEmbed], components: [] }).catch(console.error);
     await recruitmentMessage.reactions.removeAll().catch(err => console.error('リアクションの削除に失敗:', err));
   }
 
-  // ★ phaseがrecruitingの時はwasPlayingがfalseになるように調整
   const wasPlaying = (gameStatus.phase === 'playing');
   
-  // (以降の処理はほぼ変更なし)
   gameStatus.phase = 'idle';
   console.log('ゲーム/募集を終了します...');
 
@@ -497,7 +503,6 @@ async function endGame(guild, channel, reason, recruitmentMessage = null) {
     await channel.send({ embeds: [endEmbed] });
   }
 
-  // ★ gameChannelId もリセット
   gameStatus = {
     phase: 'idle', participants: new Set(), recruitmentMessageId: null,
     teams: { oni: [], runner: [] }, points: {}, gameMasterId: null, controlPanelMessageId: null,
@@ -508,7 +513,6 @@ async function endGame(guild, channel, reason, recruitmentMessage = null) {
 }
 
 async function getOrCreateRole(guild, roleName, color) {
-  // (変更なし)
   let role = guild.roles.cache.find(r => r.name === roleName);
   if (!role) {
     role = await guild.roles.create({ name: roleName, color, reason: '鬼ごっこ用ロール' });
@@ -517,7 +521,6 @@ async function getOrCreateRole(guild, roleName, color) {
 }
 
 function findTeamIdByMember(memberId, role) {
-  // (変更なし)
   const teams = gameStatus.teams[role];
   for (let i = 0; i < teams.length; i++) {
     if (teams[i].includes(memberId)) {
@@ -527,25 +530,25 @@ function findTeamIdByMember(memberId, role) {
   return null;
 }
 
+
+// ---------------------------------------------
+// ステップ5: Botを起動する
+// ---------------------------------------------
+
 // --- ボットをDiscordにログインさせる ---
 client.login(token);
 
 // --- Koyeb ヘルスチェック用の軽量Webサーバー ---
-const http = require('http');
-
 const server = http.createServer((req, res) => {
-  // Discordクライアントが正常に接続しているか（ログイン済みか）をチェック
   if (client.isReady()) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot is ready.\n');
   } else {
-    // Botがまだ準備できていない、または切断された場合はエラーを返す
     res.writeHead(503, { 'Content-Type': 'text/plain' });
     res.end('Bot is not ready.\n');
   }
 });
 
-// KoyebはPORT環境変数を自動で設定してくれる
 const port = process.env.PORT || 8000;
 server.listen(port, () => {
   console.log(`Health check server listening on port ${port}`);

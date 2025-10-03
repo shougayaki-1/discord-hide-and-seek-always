@@ -358,7 +358,19 @@ async function handleSelectMenu(interaction) {
     }
 
     await interaction.update({ content: `**${target.displayName}** を捕獲したことを記録しました！`, components: [] });
-    await interaction.channel.send(`**${interaction.member.displayName}** が **${target.displayName}** を捕獲した！ (${oniTeamId}に +${pointValue} pt)`);
+
+  // 鬼と逃走者のロールをメンションする文字列を作成（既に getOrCreateRole で取得済みの変数を使用）
+  const mentionText = `${oniRole ? `<@&${oniRole.id}>` : '@鬼'} ${runnerRole ? `<@&${runnerRole.id}>` : '@逃走者'}`;
+
+        await interaction.channel.send({
+            content: mentionText,
+            // ★ Embedを使って見やすくする（任意ですが推奨）
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(0xFF4500) // オレンジレッド
+                    .setDescription(`**${interaction.member.displayName}** が **${target.displayName}** を捕獲した！\n(${oniTeamId}に +${pointValue} pt)`)
+            ]
+        });
 
     if (gameStatus.teams.runner.flat().length === 0) {
       await endGame(interaction.guild, interaction.channel, '全ての逃走者が捕まりました！鬼チームの勝利です！');
@@ -398,7 +410,12 @@ async function issueMission(guild) {
     if (gameStatus.gameChannelId) {
         const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
         if (mainChannel) {
-            await mainChannel.send({ embeds: [missionEmbed] });
+      // 逃走者ロールを取得（存在すればメンション用にIDを使う）
+      const runnerRole = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
+      await mainChannel.send({
+        content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
+        embeds: [missionEmbed]
+      });
             console.log(`ミッションを #${mainChannel.name} に発令しました: ${missionContent}`);
         }
     }
@@ -422,7 +439,12 @@ function startPhotoRemindTimer(guild) {
     if (gameStatus.gameChannelId) {
         const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
         if (mainChannel) {
-            await mainChannel.send({ embeds: [remindEmbed] });
+      // 逃走者ロールを取得（存在すればメンション用にIDを使う）
+      const runnerRole = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
+      await mainChannel.send({
+        content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
+        embeds: [remindEmbed]
+      });
             console.log(`写真提出リマインドを #${mainChannel.name} に送信しました。`);
         }
     }
@@ -484,23 +506,20 @@ async function endGame(guild, channel, reason, recruitmentMessage = null) {
   for (const chId of gameStatus.createdChannelIds) { const ch = guild.channels.cache.get(chId); if (ch) ch.delete('ゲーム終了').catch(e => console.error(`${ch.name}の削除失敗:`, e.message)); }
   if (gameStatus.categoryChannelId) { const cat = guild.channels.cache.get(gameStatus.categoryChannelId); if (cat) cat.delete('ゲーム終了').catch(e => console.error(`カテゴリの削除失敗:`, e.message)); }
 
+  // ★ ロール剥奪の前にメンション用のロールオブジェクトを取得しておく
+  const oniRoleForMention = guild.roles.cache.find(r => r.name === ONI_ROLE_NAME);
+  const runnerRoleForMention = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
+
+  // ★ メンション用の文字列を作成（存在する場合は <@&id> 形式でメンション）
+  const mentionText = `${oniRoleForMention ? `<@&${oniRoleForMention.id}>` : '@鬼'} ${runnerRoleForMention ? `<@&${runnerRoleForMention.id}>` : '@逃走者'}`;
+
   if (channel && wasPlaying) {
-    const resultEmbed = new EmbedBuilder().setColor(0x808080).setTitle('🏆 ゲーム終了 - 結果発表 🏆').setDescription(reason);
-    const sortedTeams = Object.entries(gameStatus.points).sort(([, a], [, b]) => b - a);
-    let resultText = '';
-    sortedTeams.forEach(([teamId, points]) => {
-      const [role, index] = teamId.split('-');
-      const team = (role === 'oni') ? gameStatus.teams.oni[index] : gameStatus.teams.runner[index];
-      if (team && team.length > 0) {
-        const teamName = (role === 'oni') ? `鬼チーム ${Number(index) + 1}` : `逃走者チーム ${Number(index) + 1}`;
-        resultText += `**${teamName}**: ${points} pt\n${team.map(id => `<@${id}>`).join(' ')}\n\n`;
-      }
-    });
-    resultEmbed.addFields({ name: '最終結果', value: resultText || 'データがありません' });
-    await channel.send({ embeds: [resultEmbed] });
+    const resultEmbed = new EmbedBuilder()
+      // ...
+    await channel.send({ content: mentionText, embeds: [resultEmbed] });
   } else if (channel) {
     const endEmbed = new EmbedBuilder().setColor(0x808080).setTitle('ゲーム終了').setDescription(reason);
-    await channel.send({ embeds: [endEmbed] });
+    await channel.send({ content: mentionText, embeds: [endEmbed] });
   }
 
   gameStatus = {

@@ -1,3 +1,3 @@
 #!/bin/sh
 echo "Bot starting..."
-exec node app/index.js
+exec node index.js

@@ -36,7 +36,7 @@ function getInitialGameStatus(keepChannels = false, oldStatus = null) {
     initialTeams: { oni:[], runner:[] },
     points: (oldStatus && oldStatus.points) ? oldStatus.points : {},
     controlPanelMessageId: null,
-    settings: oldStatus ? oldStatus.settings : { timeLimit: 60, oniTeamCount: 1, teamSize: 3 },
+    settings: oldStatus ? oldStatus.settings : { timeLimit: 60, oniTeamCount: 1, teamSize: 2 },
     gameTimer: null,
     createdChannelIds: (keepChannels && oldStatus) ? oldStatus.createdChannelIds :[],
     categoryChannelId: (keepChannels && oldStatus) ? oldStatus.categoryChannelId : null,

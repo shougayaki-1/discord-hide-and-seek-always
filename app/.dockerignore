@@ -1,11 +1,22 @@
-# Node.js
-node_modules
-npm-debug.log
+# 依存関係（Dockerビルド内で npm ci するため不要）
+node_modules/
+app/node_modules/
 
-# Secret Files
-config.json
-google-credentials.json
+# 環境変数（Koyebの設定から読み込むため不要）
+.env
 
-# OS specific
+# Git関連（イメージには不要）
+.git
+.gitignore
+
+# ドキュメント・説明書
+README.md
+project-bundle-for-ai.txt
+
+# OS・エディタ設定
 .DS_Store
-Thumbs.db
+.vscode/
+.idea/
+
+# ログファイル
+*.log

@@ -128,7 +128,6 @@ if (gameStatus.phase !== ‘idle’) {
 return interaction.reply({ content: ‘他のゲームが進行中または募集中です。’, ephemeral: true });
 }
 
-```
 gameStatus = getInitialGameStatus(true, gameStatus);
 gameStatus.phase = 'recruiting';
 gameStatus.hostId = interaction.user.id;
@@ -142,7 +141,6 @@ const sent = await interaction.fetchReply();
 gameStatus.recruitmentMessageId = sent.id;
 gameStatus.gameChannelId = interaction.channelId;
 return;
-```
 
 }
 
@@ -214,7 +212,6 @@ if (others.length === 0) {
 return interaction.reply({ content: ‘ペアを組む相手がまだ参加していません。’, ephemeral: true });
 }
 
-```
 const selectMenu = new StringSelectMenuBuilder()
   .setCustomId('select_pair')
   .setPlaceholder('絶対に同じチームになりたい相手を選択');
@@ -233,7 +230,6 @@ return interaction.reply({
   components: [new ActionRowBuilder().addComponents(selectMenu)],
   ephemeral: true
 });
-```
 
 }
 
@@ -309,7 +305,6 @@ if (gameStatus.participants.size < 2) {
 return interaction.reply({ content: ‘参加者が少なすぎます（最低2人必要）。’, ephemeral: true });
 }
 
-```
 await interaction.update({ content: 'チーム分け・チャンネル設定中...', components: [] });
 const result = await setupTeamsAndChannels(interaction.guild);
 if (!result.success) {
@@ -322,7 +317,6 @@ const controlCh = interaction.guild.channels.cache.find(
 );
 if (controlCh) await sendControlPanel(controlCh);
 return;
-```
 
 }
 
@@ -339,7 +333,6 @@ await stripAllRoles(interaction.guild);
 const result = await performTeamShuffle(interaction.guild);
 if (!result.success) return interaction.editReply(`⚠️ エラー: ${result.message}`);
 
-```
 // チーム編成をチャンネルにメンション付きで通知
 const controlCh = interaction.guild.channels.cache.find(
   c => c.name === '📢全体連絡' && c.parentId === gameStatus.categoryChannelId
@@ -347,7 +340,6 @@ const controlCh = interaction.guild.channels.cache.find(
 if (controlCh) await announceTeams(controlCh);
 
 return interaction.editReply('🔀 **チームを再抽選しました！** 各陣営チャンネルのメンションを確認してください。');
-```
 
 }
 
@@ -360,7 +352,6 @@ if (gameStatus.phase !== ‘ready’) {
 return interaction.reply({ content: ‘準備完了していません。’, ephemeral: true });
 }
 
-```
 gameStatus.phase = 'playing';
 await interaction.reply(`▶️ **ゲームスタート！** 制限時間は **${gameStatus.settings.timeLimit}分** です！`);
 
@@ -387,7 +378,6 @@ gameStatus.gameTimer = setTimeout(() => {
 startMissionTimer(interaction.guild);
 startPhotoRemindTimer(interaction.guild);
 return;
-```
 
 }
 
@@ -404,7 +394,6 @@ if (gameStatus.teams.runner.length === 0) {
 return interaction.reply({ content: ‘逃走者がいません。’, ephemeral: true });
 }
 
-```
 const selectMenu = new StringSelectMenuBuilder()
   .setCustomId('catch_select_menu')
   .setPlaceholder('捕獲したチームを選択');
@@ -420,7 +409,6 @@ return interaction.reply({
   components: [new ActionRowBuilder().addComponents(selectMenu)],
   ephemeral: true
 });
-```
 
 }
 
@@ -468,7 +456,6 @@ interaction.user.id !== gameStatus.hostId &&
 return interaction.reply({ content: ‘ホストまたは管理者専用です。’, ephemeral: true });
 }
 
-```
 if (customId === 'btn_cont_same') {
   await interaction.deferReply();
   // initialTeams は JSON.parse/stringify で保存されているので Set が失われていない
@@ -539,7 +526,6 @@ if (customId === 'btn_end_cleanup') {
   gameStatus = getInitialGameStatus(false);
   return interaction.editReply('🗑️ **クリーンアップ完了！お疲れ様でした。**');
 }
-```
 
 }
 }
@@ -554,12 +540,11 @@ const data = gameStatus.participants.get(interaction.user.id);
 if (!data) return interaction.reply({ content: ‘参加情報が見つかりません。再度参加ボタンを押してください。’, ephemeral: true });
 data.guests.push(…guestNames);
 
-```
+
 // 募集パネルメッセージを更新
 const msg = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
 if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
 return interaction.reply({ content: `✅ ゲスト「${guestNames.join(', ')}」を追加しました！`, ephemeral: true });
-```
 
 }
 
@@ -571,7 +556,6 @@ if (isNaN(time) || isNaN(oniCount) || isNaN(teamSize) || oniCount < 1 || teamSiz
 return interaction.reply({ content: ‘正しい数値を入力してください。’, ephemeral: true });
 }
 
-```
 gameStatus.settings.timeLimit = time;
 gameStatus.settings.oniTeamCount = oniCount;
 gameStatus.settings.teamSize = teamSize;
@@ -579,7 +563,6 @@ gameStatus.settings.teamSize = teamSize;
 const msg = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
 if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
 return interaction.reply({ content: '✅ 基本設定を保存し、募集パネルを更新しました。', ephemeral: true });
-```
 
 }
 
@@ -591,7 +574,6 @@ if (isNaN(photo) || isNaN(min) || isNaN(max) || min > max || photo < 1) {
 return interaction.reply({ content: ‘正しい数値を入力してください（最小間隔は最大間隔以下にしてください）。’, ephemeral: true });
 }
 
-```
 gameStatus.photoRemind.interval = photo;
 gameStatus.mission.intervalMin = min;
 gameStatus.mission.intervalMax = max;
@@ -599,7 +581,6 @@ gameStatus.mission.intervalMax = max;
 const msg = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
 if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
 return interaction.reply({ content: '✅ 通知/間隔設定を保存し、募集パネルを更新しました。', ephemeral: true });
-```
 
 }
 
@@ -614,7 +595,6 @@ const teamId = interaction.customId.replace(‘modal_point_’, ‘’);
 const points = parseInt(interaction.fields.getTextInputValue(‘input_point’));
 if (isNaN(points)) return interaction.reply({ content: ‘数値を入力してください。’, ephemeral: true });
 
-```
 gameStatus.points[teamId] = (gameStatus.points[teamId] || 0) + points;
 
 let teamName = '不明なチーム';
@@ -635,7 +615,6 @@ if (controlCh) {
   );
 }
 return interaction.reply({ content: `✅ ${teamName} に ${points}pt を付与しました。`, ephemeral: true });
-```
 
 }
 }
@@ -647,7 +626,6 @@ const targetId = interaction.values[0];
 const myData = gameStatus.participants.get(interaction.user.id);
 const targetData = gameStatus.participants.get(targetId);
 
-```
 if (!myData || !targetData) {
   return interaction.update({ content: '⚠️ 参加者情報が見つかりません。', components: [] });
 }
@@ -666,7 +644,6 @@ await interaction.update({
 const msg = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
 if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
 return;
-```
 
 }
 
@@ -692,7 +669,6 @@ if (teamIndex === -1) {
 return interaction.update({ content: ‘そのチームは既に捕獲されています。’, components: [] });
 }
 
-```
 // 捕獲した鬼チームにポイント付与
 const trackerTeam = gameStatus.teams.oni.find(t => t.discordIds.includes(interaction.user.id));
 if (trackerTeam) {
@@ -731,7 +707,6 @@ if (gameStatus.teams.runner.length === 0) {
   await endGame(interaction.guild, controlCh, '🎊 全員の逃走者が捕まりました！鬼陣営の勝利です！');
 }
 return;
-```
 
 }
 }
@@ -823,7 +798,6 @@ let queue = [id];
 let currentDiscordIds = [];
 let currentGuests = [];
 
-```
 while (queue.length > 0) {
   const curr = queue.shift();
   if (handled.has(curr)) continue;
@@ -839,7 +813,6 @@ while (queue.length > 0) {
   }
 }
 groups.push({ discordIds: currentDiscordIds, guests: currentGuests });
-```
 
 }
 

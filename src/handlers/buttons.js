@@ -9,7 +9,7 @@ const {
   TextInputStyle,
   StringSelectMenuBuilder,
 } = require('discord.js');
-const { state, getInitialGameStatus } = require('../state');
+const { getGame, setGame, getInitialGameStatus } = require('../state');
 const { ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
 const { generateRecruitEmbed } = require('../ui/embeds');
 const {
@@ -28,13 +28,17 @@ const {
 const { startMissionTimer, startPhotoRemindTimer } = require('../game/missions');
 const { endGame, clearAllTimers } = require('../game/lifecycle');
 
-const isHost = (interaction) => interaction.user.id === state.game.hostId;
+const isHost = (interaction, game) => interaction.user.id === game.hostId;
 const hostOnly = (interaction) =>
   interaction.reply({ content: 'ホスト専用です。', ephemeral: true });
 
 async function handleButton(interaction) {
+  if (!interaction.guild) {
+    return interaction.reply({ content: 'このボタンはサーバー内でのみ使用できます。', ephemeral: true });
+  }
   const { customId } = interaction;
-  const game = state.game;
+  const guildId = interaction.guild.id;
+  const game = getGame(guildId);
 
   // ▼ 参加/取消
   if (customId === 'btn_join_leave') {
@@ -51,7 +55,7 @@ async function handleButton(interaction) {
       });
     }
     return interaction.update({
-      embeds: [generateRecruitEmbed()],
+      embeds: [generateRecruitEmbed(game)],
       components: generateRecruitButtons(),
     });
   }
@@ -105,7 +109,7 @@ async function handleButton(interaction) {
 
   // ▼ ホスト専用メニューの展開
   if (customId === 'btn_host_menu') {
-    if (!isHost(interaction)) {
+    if (!isHost(interaction, game)) {
       return interaction.reply({
         content: 'このメニューはホスト（募集開始者）専用です！',
         ephemeral: true,
@@ -113,14 +117,14 @@ async function handleButton(interaction) {
     }
     return interaction.reply({
       content: '👑 **ホスト専用設定メニュー**\nここでゲームの設定や募集の締め切りを行えます。',
-      components: generateHostMenuButtons(),
+      components: generateHostMenuButtons(game),
       ephemeral: true,
     });
   }
 
   // ▼ 基本設定モーダル
   if (customId === 'btn_setup_basic') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     const modal = new ModalBuilder().setCustomId('modal_setup_basic').setTitle('基本設定（時間・人数）');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -153,7 +157,7 @@ async function handleButton(interaction) {
 
   // ▼ 通知/ミッション設定モーダル
   if (customId === 'btn_setup_mission') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     const modal = new ModalBuilder().setCustomId('modal_setup_mission').setTitle('通知・ミッション設定');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -186,54 +190,54 @@ async function handleButton(interaction) {
 
   // ▼ ミッション ON/OFF 切替
   if (customId === 'btn_toggle_mission') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     game.mission.enabled = !game.mission.enabled;
-    await interaction.update({ components: generateHostMenuButtons() });
+    await interaction.update({ components: generateHostMenuButtons(game) });
     // ゲーム中に ON にした場合はタイマーチェーンを起動（多重起動は内部で防止）
     if (game.mission.enabled && game.phase === 'playing') {
-      startMissionTimer(interaction.guild);
+      startMissionTimer(interaction.guild, game);
     }
     if (game.recruitmentMessageId) {
       const msg = await interaction.channel.messages
         .fetch(game.recruitmentMessageId)
         .catch(() => null);
-      if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+      if (msg) await msg.edit({ embeds: [generateRecruitEmbed(game)] });
     }
     return;
   }
 
   // ▼ 募集終了＆チーム分け
   if (customId === 'btn_close_recruit') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     if (game.participants.size < 2) {
       return interaction.reply({ content: '参加者が少なすぎます（最低2人必要）。', ephemeral: true });
     }
 
     await interaction.update({ content: 'チーム分け・チャンネル設定中...', components: [] });
-    const result = await setupTeamsAndChannels(interaction.guild);
+    const result = await setupTeamsAndChannels(interaction.guild, game);
     if (!result.success) {
       return interaction.editReply({ content: `⚠️ エラー: ${result.message}` });
     }
 
     await interaction.editReply({ content: '✅ 準備完了！各チャンネルで作戦会議をしてください。' });
-    const controlCh = getControlChannel(interaction.guild);
-    if (controlCh) await sendControlPanel(controlCh);
+    const controlCh = getControlChannel(interaction.guild, game);
+    if (controlCh) await sendControlPanel(controlCh, game);
     return;
   }
 
   // ▼ チーム再抽選
   if (customId === 'btn_reshuffle') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     if (game.phase !== 'ready') {
       return interaction.reply({ content: '準備完了フェーズでのみ可能です。', ephemeral: true });
     }
     await interaction.deferReply();
-    await stripAllRoles(interaction.guild);
-    const result = await performTeamShuffle(interaction.guild);
+    await stripAllRoles(interaction.guild, game);
+    const result = await performTeamShuffle(interaction.guild, game);
     if (!result.success) return interaction.editReply(`⚠️ エラー: ${result.message}`);
 
-    const controlCh = getControlChannel(interaction.guild);
-    if (controlCh) await announceTeams(controlCh);
+    const controlCh = getControlChannel(interaction.guild, game);
+    if (controlCh) await announceTeams(controlCh, game);
 
     return interaction.editReply(
       '🔀 **チームを再抽選しました！** 各陣営チャンネルのメンションを確認してください。'
@@ -242,7 +246,7 @@ async function handleButton(interaction) {
 
   // ▼ ゲーム開始
   if (customId === 'start_game_button') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     if (game.phase !== 'ready') {
       return interaction.reply({ content: '準備完了していません。', ephemeral: true });
     }
@@ -258,13 +262,13 @@ async function handleButton(interaction) {
     if (panelMsg) await panelMsg.edit(buildPlayingPanel());
 
     // 多重起動防止のため既存タイマーを破棄してから張り直す
-    clearAllTimers();
+    clearAllTimers(game);
     game.gameTimer = setTimeout(() => {
-      endGame(interaction.guild, interaction.channel, '⏰ 時間切れ！ゲーム終了です！');
+      endGame(interaction.guild, interaction.channel, '⏰ 時間切れ！ゲーム終了です！', game);
     }, game.settings.timeLimit * 60 * 1000);
 
-    startMissionTimer(interaction.guild);
-    startPhotoRemindTimer(interaction.guild);
+    startMissionTimer(interaction.guild, game);
+    startPhotoRemindTimer(interaction.guild, game);
     return;
   }
 
@@ -274,7 +278,7 @@ async function handleButton(interaction) {
       return interaction.reply({ content: 'ゲーム中のみ有効です。', ephemeral: true });
     }
     const isOni = game.teams.oni.some((t) => t.discordIds.includes(interaction.user.id));
-    if (!isOni && !isHost(interaction)) {
+    if (!isOni && !isHost(interaction, game)) {
       return interaction.reply({ content: '鬼陣営のみ報告できます。', ephemeral: true });
     }
     if (game.teams.runner.length === 0) {
@@ -300,7 +304,7 @@ async function handleButton(interaction) {
 
   // ▼ ポイント操作
   if (customId === 'btn_give_point') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId('select_point_team')
       .setPlaceholder('ポイントを与えるチームを選択');
@@ -327,7 +331,7 @@ async function handleButton(interaction) {
 
   // ▼ ミッション手動追加
   if (customId === 'btn_add_mission') {
-    if (!isHost(interaction)) return hostOnly(interaction);
+    if (!isHost(interaction, game)) return hostOnly(interaction);
     const modal = new ModalBuilder().setCustomId('modal_add_mission').setTitle('ミッション手動追加');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -344,24 +348,22 @@ async function handleButton(interaction) {
   // ▼ コンティニュー・終了操作
   if (['btn_cont_same', 'btn_cont_shuffle', 'btn_end_keep', 'btn_end_cleanup'].includes(customId)) {
     const isAdmin = interaction.member?.permissions?.has(PermissionsBitField.Flags.Administrator);
-    if (!isHost(interaction) && !isAdmin) {
+    if (!isHost(interaction, game) && !isAdmin) {
       return interaction.reply({ content: 'ホストまたは管理者専用です。', ephemeral: true });
     }
-    return handleContinue(interaction, customId);
+    return handleContinue(interaction, customId, game, guildId);
   }
 }
 
 // コンティニュー・終了の各分岐
-async function handleContinue(interaction, customId) {
-  const game = state.game;
-
+async function handleContinue(interaction, customId, game, guildId) {
   if (customId === 'btn_cont_same') {
     await interaction.deferReply();
     game.teams = {
       oni: game.initialTeams.oni.map((t) => ({ ...t })),
       runner: game.initialTeams.runner.map((t) => ({ ...t })),
     };
-    await stripAllRoles(interaction.guild);
+    await stripAllRoles(interaction.guild, game);
 
     const oniRole = await getOrCreateRole(interaction.guild, ONI_ROLE_NAME, 'Red');
     const runnerRole = await getOrCreateRole(interaction.guild, RUNNER_ROLE_NAME, 'Blue');
@@ -382,40 +384,40 @@ async function handleContinue(interaction, customId) {
     await interaction.editReply(
       '🔄 **同じチームでコンティニューします！** 各陣営のチャンネルで作戦会議をしてください。'
     );
-    const controlCh = getControlChannel(interaction.guild);
+    const controlCh = getControlChannel(interaction.guild, game);
     if (controlCh) {
-      await announceTeams(controlCh);
-      await sendControlPanel(controlCh);
+      await announceTeams(controlCh, game);
+      await sendControlPanel(controlCh, game);
     }
     return;
   }
 
   if (customId === 'btn_cont_shuffle') {
     await interaction.deferReply();
-    await stripAllRoles(interaction.guild);
+    await stripAllRoles(interaction.guild, game);
     const oldPoints = game.points;
-    state.game = getInitialGameStatus(true, game);
-    state.game.points = oldPoints; // ポイントを引き継ぐ場合はこの行を残す
-    state.game.phase = 'recruiting';
-    state.game.hostId = interaction.user.id;
-    state.game.participants.set(interaction.user.id, {
+    const newGame = setGame(guildId, getInitialGameStatus(true, game));
+    newGame.points = oldPoints; // ポイントを引き継ぐ場合はこの行を残す
+    newGame.phase = 'recruiting';
+    newGame.hostId = interaction.user.id;
+    newGame.participants.set(interaction.user.id, {
       discordId: interaction.user.id,
       guests: [],
       pairedWith: new Set(),
     });
     const msg = await interaction.channel.send({
-      embeds: [generateRecruitEmbed()],
+      embeds: [generateRecruitEmbed(newGame)],
       components: generateRecruitButtons(),
     });
-    state.game.recruitmentMessageId = msg.id;
-    state.game.gameChannelId = interaction.channelId;
+    newGame.recruitmentMessageId = msg.id;
+    newGame.gameChannelId = interaction.channelId;
     return interaction.editReply('🔀 **チームとポイントをリセットしました！再度募集を行います。**');
   }
 
   if (customId === 'btn_end_keep') {
     await interaction.deferReply();
-    await stripAllRoles(interaction.guild);
-    state.game = getInitialGameStatus(true, game);
+    await stripAllRoles(interaction.guild, game);
+    setGame(guildId, getInitialGameStatus(true, game));
     return interaction.editReply(
       '♻️ **ゲームを終了しました。チャンネルは次回のために残しておきます。**'
     );
@@ -423,9 +425,9 @@ async function handleContinue(interaction, customId) {
 
   if (customId === 'btn_end_cleanup') {
     await interaction.deferReply();
-    await stripAllRoles(interaction.guild);
-    await cleanupChannels(interaction.guild);
-    state.game = getInitialGameStatus(false);
+    await stripAllRoles(interaction.guild, game);
+    await cleanupChannels(interaction.guild, game);
+    setGame(guildId, getInitialGameStatus(false));
     return interaction.editReply('🗑️ **クリーンアップ完了！お疲れ様でした。**');
   }
 }

@@ -1,14 +1,13 @@
 // ==========================================
 // チーム編成・チャンネル生成
+// （game はサーバーごとの状態）
 // ==========================================
 const { PermissionsBitField, ChannelType } = require('discord.js');
-const { state } = require('../state');
 const { CHANNELS, ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
-const { getOrCreateRole, getControlChannel, findGameChannel } = require('../utils/discord');
+const { getOrCreateRole, findGameChannel } = require('../utils/discord');
 
 // ペア固定を考慮してチームを抽選し、ロールを付与する
-async function performTeamShuffle(guild) {
-  const game = state.game;
+async function performTeamShuffle(guild, game) {
   const handled = new Set();
   const groups = [];
 
@@ -114,24 +113,24 @@ function buildOverwrites(guild, allowedRoleIds) {
 }
 
 // チーム分け＋専用チャンネル一式を用意する
-async function setupTeamsAndChannels(guild) {
-  const shuffleResult = await performTeamShuffle(guild);
+async function setupTeamsAndChannels(guild, game) {
+  const shuffleResult = await performTeamShuffle(guild, game);
   if (!shuffleResult.success) return shuffleResult;
 
   const { oniRole, runnerRole } = shuffleResult.roles;
-  state.game.phase = 'ready';
+  game.phase = 'ready';
 
-  let category = guild.channels.cache.get(state.game.categoryChannelId);
+  let category = guild.channels.cache.get(game.categoryChannelId);
   if (!category) {
     category = await guild.channels.create({
       name: CHANNELS.CATEGORY,
       type: ChannelType.GuildCategory,
     });
-    state.game.categoryChannelId = category.id;
+    game.categoryChannelId = category.id;
   }
 
   // 全体連絡（全員閲覧可）
-  let controlCh = findGameChannel(guild, CHANNELS.CONTROL);
+  let controlCh = findGameChannel(guild, game, CHANNELS.CONTROL);
   if (!controlCh) {
     controlCh = await guild.channels.create({
       name: CHANNELS.CONTROL,
@@ -147,7 +146,7 @@ async function setupTeamsAndChannels(guild) {
   }
 
   // 写真共有（鬼・逃走者のみ）
-  let photoCh = findGameChannel(guild, CHANNELS.PHOTO);
+  let photoCh = findGameChannel(guild, game, CHANNELS.PHOTO);
   if (!photoCh) {
     photoCh = await guild.channels.create({
       name: CHANNELS.PHOTO,
@@ -158,8 +157,8 @@ async function setupTeamsAndChannels(guild) {
   }
 
   // 鬼陣営チャンネル
-  let oniText = findGameChannel(guild, CHANNELS.ONI_TEXT);
-  let oniVC = findGameChannel(guild, CHANNELS.ONI_VC);
+  let oniText = findGameChannel(guild, game, CHANNELS.ONI_TEXT);
+  let oniVC = findGameChannel(guild, game, CHANNELS.ONI_VC);
   if (!oniText) {
     oniText = await guild.channels.create({
       name: CHANNELS.ONI_TEXT,
@@ -178,8 +177,8 @@ async function setupTeamsAndChannels(guild) {
   }
 
   // 逃走者陣営チャンネル
-  let runText = findGameChannel(guild, CHANNELS.RUN_TEXT);
-  let runVC = findGameChannel(guild, CHANNELS.RUN_VC);
+  let runText = findGameChannel(guild, game, CHANNELS.RUN_TEXT);
+  let runVC = findGameChannel(guild, game, CHANNELS.RUN_VC);
   if (!runText) {
     runText = await guild.channels.create({
       name: CHANNELS.RUN_TEXT,
@@ -197,9 +196,9 @@ async function setupTeamsAndChannels(guild) {
     });
   }
 
-  state.game.createdChannelIds = [photoCh.id, oniText.id, oniVC.id, runText.id, runVC.id];
+  game.createdChannelIds = [photoCh.id, oniText.id, oniVC.id, runText.id, runVC.id];
 
-  await announceTeams(controlCh);
+  await announceTeams(controlCh, game);
   await oniText.send(`<@&${oniRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
   await runText.send(`<@&${runnerRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
 
@@ -207,18 +206,18 @@ async function setupTeamsAndChannels(guild) {
 }
 
 // チーム編成をメンション付きで全体連絡へ投稿
-async function announceTeams(channel) {
+async function announceTeams(channel, game) {
   const lines = ['📋 **チーム編成が決まりました！**\n'];
   const formatGuests = (team) =>
     team.displayMembers.filter((m) => m.startsWith('(ゲスト)')).join(', ');
 
-  state.game.teams.oni.forEach((team, i) => {
+  game.teams.oni.forEach((team, i) => {
     const mentions = team.discordIds.map((id) => `<@${id}>`).join(' ');
     const guests = formatGuests(team);
     lines.push(`👹 **鬼 ${i + 1}班**: ${mentions}${guests ? ` / ゲスト: ${guests}` : ''}`);
   });
 
-  state.game.teams.runner.forEach((team, i) => {
+  game.teams.runner.forEach((team, i) => {
     const mentions = team.discordIds.map((id) => `<@${id}>`).join(' ');
     const guests = formatGuests(team);
     lines.push(`🏃 **逃走者 ${i + 1}班**: ${mentions}${guests ? ` / ゲスト: ${guests}` : ''}`);
@@ -227,4 +226,4 @@ async function announceTeams(channel) {
   await channel.send(lines.join('\n'));
 }
 
-module.exports = { performTeamShuffle, setupTeamsAndChannels, announceTeams, getControlChannel };
+module.exports = { performTeamShuffle, setupTeamsAndChannels, announceTeams };

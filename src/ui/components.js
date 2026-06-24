@@ -2,7 +2,6 @@
 // ボタン/コンポーネント生成
 // ==========================================
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-const { state } = require('../state');
 const { COLORS } = require('../config');
 
 // 募集パネルのボタン
@@ -17,8 +16,8 @@ function generateRecruitButtons() {
 }
 
 // ホスト専用メニューのボタン
-function generateHostMenuButtons() {
-  const enabled = state.game.mission.enabled;
+function generateHostMenuButtons(game) {
+  const enabled = game.mission.enabled;
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('btn_setup_basic').setLabel('⚙️ 時間/人数設定').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('btn_setup_mission').setLabel('⚙️ 通知/間隔設定').setStyle(ButtonStyle.Secondary),
@@ -34,7 +33,7 @@ function generateHostMenuButtons() {
 }
 
 // 準備中コントロールパネルを送信し、メッセージIDを保存
-async function sendControlPanel(channel) {
+async function sendControlPanel(channel, game) {
   const embed = new EmbedBuilder()
     .setColor(COLORS.PANEL)
     .setTitle('🎮 ゲームコントロールパネル (準備中)')
@@ -44,7 +43,7 @@ async function sendControlPanel(channel) {
     new ButtonBuilder().setCustomId('btn_reshuffle').setLabel('🔀 チーム再抽選').setStyle(ButtonStyle.Secondary)
   );
   const sentMessage = await channel.send({ embeds: [embed], components: [row1] });
-  state.game.controlPanelMessageId = sentMessage.id;
+  game.controlPanelMessageId = sentMessage.id;
 }
 
 // ゲーム進行中パネル（embed + ボタン行）

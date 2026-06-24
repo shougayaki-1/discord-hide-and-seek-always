@@ -2,12 +2,10 @@
 // Embed 生成
 // ==========================================
 const { EmbedBuilder } = require('discord.js');
-const { state } = require('../state');
 const { COLORS } = require('../config');
 
-// 募集パネルの Embed
-function generateRecruitEmbed() {
-  const game = state.game;
+// 募集パネルの Embed（game はサーバーごとの状態）
+function generateRecruitEmbed(game) {
   let pList = '';
   let totalCount = 0;
   if (game.participants.size === 0) {

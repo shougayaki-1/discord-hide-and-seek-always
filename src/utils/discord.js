@@ -1,22 +1,22 @@
 // ==========================================
 // Discord 共通ユーティリティ
+// （状態はサーバーごとに異なるため game を引数で受け取る）
 // ==========================================
-const { state } = require('../state');
 const { CHANNELS, ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
 
-// カテゴリ内のチャンネルを名前で検索
-function findGameChannel(guild, name) {
+// このサーバーのカテゴリ内のチャンネルを名前で検索
+function findGameChannel(guild, game, name) {
   return guild.channels.cache.find(
-    (c) => c.name === name && c.parentId === state.game.categoryChannelId
+    (c) => c.name === name && c.parentId === game.categoryChannelId
   );
 }
 
-// 全体連絡チャンネルを取得（旧コードで6箇所以上に重複していた処理を集約）
-function getControlChannel(guild) {
-  return findGameChannel(guild, CHANNELS.CONTROL);
+// 全体連絡チャンネルを取得
+function getControlChannel(guild, game) {
+  return findGameChannel(guild, game, CHANNELS.CONTROL);
 }
 
-// 役職を取得、無ければ作成
+// 役職を取得、無ければ作成（役職はサーバーごとに独立）
 async function getOrCreateRole(guild, roleName, color) {
   let role = guild.roles.cache.find((r) => r.name === roleName);
   if (!role) role = await guild.roles.create({ name: roleName, color, reason: '鬼ごっこ用' });
@@ -24,10 +24,10 @@ async function getOrCreateRole(guild, roleName, color) {
 }
 
 // 参加者全員から鬼/逃走者ロールを剥がす
-async function stripAllRoles(guild) {
+async function stripAllRoles(guild, game) {
   const oniRole = guild.roles.cache.find((r) => r.name === ONI_ROLE_NAME);
   const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
-  for (const dId of state.game.participants.keys()) {
+  for (const dId of game.participants.keys()) {
     const m = await guild.members.fetch(dId).catch(() => null);
     if (!m) continue;
     if (oniRole) await m.roles.remove(oniRole).catch(() => {});
@@ -36,17 +36,17 @@ async function stripAllRoles(guild) {
 }
 
 // 作成したチャンネルとカテゴリを削除
-async function cleanupChannels(guild) {
-  for (const chId of state.game.createdChannelIds) {
+async function cleanupChannels(guild, game) {
+  for (const chId of game.createdChannelIds) {
     const ch = guild.channels.cache.get(chId);
     if (ch) await ch.delete().catch(() => {});
   }
-  if (state.game.categoryChannelId) {
-    const cat = guild.channels.cache.get(state.game.categoryChannelId);
+  if (game.categoryChannelId) {
+    const cat = guild.channels.cache.get(game.categoryChannelId);
     if (cat) await cat.delete().catch(() => {});
   }
-  state.game.createdChannelIds = [];
-  state.game.categoryChannelId = null;
+  game.createdChannelIds = [];
+  game.categoryChannelId = null;
 }
 
 module.exports = {

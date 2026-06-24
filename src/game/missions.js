@@ -1,33 +1,33 @@
 // ==========================================
 // ミッション・写真リマインドのタイマー
+// （game はサーバーごとの状態。タイマー中もこの参照を保持する）
 // ==========================================
 const { EmbedBuilder } = require('discord.js');
-const { state } = require('../state');
 const { RUNNER_ROLE_NAME, COLORS } = require('../config');
 const { getControlChannel } = require('../utils/discord');
 
 // ミッションタイマー開始（既に稼働中なら何もしない＝多重起動防止）
-function startMissionTimer(guild) {
-  if (state.game.mission.timer) return;
-  scheduleNextMission(guild);
+function startMissionTimer(guild, game) {
+  if (game.mission.timer) return;
+  scheduleNextMission(guild, game);
 }
 
-function scheduleNextMission(guild) {
-  const m = state.game.mission;
+function scheduleNextMission(guild, game) {
+  const m = game.mission;
   const intervalMs =
     (Math.floor(Math.random() * (m.intervalMax - m.intervalMin + 1)) + m.intervalMin) * 60 * 1000;
 
   m.timer = setTimeout(async () => {
     m.timer = null;
-    if (state.game.phase !== 'playing') return;
+    if (game.phase !== 'playing') return;
     // 発令タイミングで enabled を判定（途中ON/OFFに追従）
-    if (m.enabled) await issueMission(guild);
-    scheduleNextMission(guild);
+    if (m.enabled) await issueMission(guild, game);
+    scheduleNextMission(guild, game);
   }, intervalMs);
 }
 
-async function issueMission(guild) {
-  const m = state.game.mission;
+async function issueMission(guild, game) {
+  const m = game.mission;
   let missionContent;
   if (m.customMissions.length > 0) {
     missionContent = m.customMissions.shift();
@@ -35,7 +35,7 @@ async function issueMission(guild) {
     missionContent = m.defaultMissions[Math.floor(Math.random() * m.defaultMissions.length)];
   }
 
-  const controlCh = getControlChannel(guild);
+  const controlCh = getControlChannel(guild, game);
   if (!controlCh) return;
   const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
   const embed = new EmbedBuilder()
@@ -46,11 +46,11 @@ async function issueMission(guild) {
   await controlCh.send({ content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者', embeds: [embed] });
 }
 
-function startPhotoRemindTimer(guild) {
-  if (state.game.photoRemind.timer) return;
-  state.game.photoRemind.timer = setInterval(async () => {
-    if (state.game.phase !== 'playing') return;
-    const controlCh = getControlChannel(guild);
+function startPhotoRemindTimer(guild, game) {
+  if (game.photoRemind.timer) return;
+  game.photoRemind.timer = setInterval(async () => {
+    if (game.phase !== 'playing') return;
+    const controlCh = getControlChannel(guild, game);
     if (!controlCh) return;
     const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
     const embed = new EmbedBuilder()
@@ -61,7 +61,7 @@ function startPhotoRemindTimer(guild) {
       content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
       embeds: [embed],
     });
-  }, state.game.photoRemind.interval * 60 * 1000);
+  }, game.photoRemind.interval * 60 * 1000);
 }
 
 module.exports = { startMissionTimer, issueMission, startPhotoRemindTimer };

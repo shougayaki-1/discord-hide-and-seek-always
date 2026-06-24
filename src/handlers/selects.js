@@ -7,14 +7,17 @@ const {
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
-const { state } = require('../state');
+const { getGame } = require('../state');
 const { ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
 const { generateRecruitEmbed } = require('../ui/embeds');
 const { getControlChannel } = require('../utils/discord');
 const { endGame } = require('../game/lifecycle');
 
 async function handleSelectMenu(interaction) {
-  const game = state.game;
+  if (!interaction.guild) {
+    return interaction.reply({ content: 'このメニューはサーバー内でのみ使用できます。', ephemeral: true });
+  }
+  const game = getGame(interaction.guild.id);
 
   // ▼ ペア相手の選択
   if (interaction.customId === 'select_pair') {
@@ -43,7 +46,7 @@ async function handleSelectMenu(interaction) {
       const msg = await interaction.channel.messages
         .fetch(game.recruitmentMessageId)
         .catch(() => null);
-      if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+      if (msg) await msg.edit({ embeds: [generateRecruitEmbed(game)] });
     }
     return;
   }
@@ -99,7 +102,7 @@ async function handleSelectMenu(interaction) {
       components: [],
     });
 
-    const controlCh = getControlChannel(interaction.guild);
+    const controlCh = getControlChannel(interaction.guild, game);
     if (controlCh) {
       await controlCh.send(
         `🚨 **捕獲情報** 🚨\n<@${interaction.user.id}> が逃走者を捕まえました！(+100pt)\n捕まったメンバー: **${caughtTeam.displayMembers.join(
@@ -109,7 +112,7 @@ async function handleSelectMenu(interaction) {
     }
 
     if (game.teams.runner.length === 0) {
-      await endGame(interaction.guild, controlCh, '🎊 全員の逃走者が捕まりました！鬼陣営の勝利です！');
+      await endGame(interaction.guild, controlCh, '🎊 全員の逃走者が捕まりました！鬼陣営の勝利です！', game);
     }
     return;
   }

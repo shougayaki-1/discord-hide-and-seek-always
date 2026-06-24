@@ -1,10 +1,9 @@
 // ==========================================
-// ゲーム状態管理
+// ゲーム状態管理（サーバー＝guildごとに独立）
 //
-// 注意: gameStatus は複数箇所で「丸ごと差し替え」される。
-// import binding の再代入は他モジュールへ伝播しないため、
-// 状態は state コンテナ経由（state.game）で共有し、
-// リセット時は state.game = getInitialGameStatus(...) で差し替える。
+// マルチサーバー対応: 状態を Map<guildId, gameState> で保持する。
+// 各処理は guildId から getGame() で自分のサーバーの状態を取得する。
+// 状態を丸ごと差し替えるリセットは setGame() を使う。
 // ==========================================
 
 function getInitialGameStatus(keepChannels = false, oldStatus = null) {
@@ -44,7 +43,28 @@ function getInitialGameStatus(keepChannels = false, oldStatus = null) {
   };
 }
 
-// 全モジュールが参照する状態コンテナ
-const state = { game: getInitialGameStatus() };
+// guildId -> gameState
+const games = new Map();
 
-module.exports = { state, getInitialGameStatus };
+// 該当サーバーの状態を取得（無ければ idle 状態を生成）
+function getGame(guildId) {
+  let game = games.get(guildId);
+  if (!game) {
+    game = getInitialGameStatus();
+    games.set(guildId, game);
+  }
+  return game;
+}
+
+// 該当サーバーの状態を差し替える
+function setGame(guildId, game) {
+  games.set(guildId, game);
+  return game;
+}
+
+// 該当サーバーの状態を破棄（クリーンアップ完了時など）
+function deleteGame(guildId) {
+  games.delete(guildId);
+}
+
+module.exports = { getGame, setGame, deleteGame, getInitialGameStatus, games };

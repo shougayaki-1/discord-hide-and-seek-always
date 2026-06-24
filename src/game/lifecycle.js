@@ -2,12 +2,10 @@
 // ゲーム終了処理
 // ==========================================
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { state } = require('../state');
 const { ONI_ROLE_NAME, RUNNER_ROLE_NAME, COLORS } = require('../config');
 
 // 進行中の全タイマーを停止
-function clearAllTimers() {
-  const game = state.game;
+function clearAllTimers(game) {
   if (game.gameTimer) clearTimeout(game.gameTimer);
   if (game.mission.timer) clearTimeout(game.mission.timer);
   if (game.photoRemind.timer) clearInterval(game.photoRemind.timer);
@@ -16,10 +14,9 @@ function clearAllTimers() {
   game.photoRemind.timer = null;
 }
 
-async function endGame(guild, channel, reason) {
-  const game = state.game;
+async function endGame(guild, channel, reason, game) {
   game.phase = 'postgame';
-  clearAllTimers();
+  clearAllTimers(game);
 
   // コントロールパネルのボタンを無効化
   if (game.controlPanelMessageId && channel) {

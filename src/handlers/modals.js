@@ -1,21 +1,24 @@
 // ==========================================
 // モーダル送信処理
 // ==========================================
-const { state } = require('../state');
+const { getGame } = require('../state');
 const { generateRecruitEmbed } = require('../ui/embeds');
 const { getControlChannel } = require('../utils/discord');
 
 // 募集パネルメッセージを最新状態へ更新
-async function refreshRecruitPanel(interaction) {
-  if (!state.game.recruitmentMessageId) return;
+async function refreshRecruitPanel(interaction, game) {
+  if (!game.recruitmentMessageId) return;
   const msg = await interaction.channel.messages
-    .fetch(state.game.recruitmentMessageId)
+    .fetch(game.recruitmentMessageId)
     .catch(() => null);
-  if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+  if (msg) await msg.edit({ embeds: [generateRecruitEmbed(game)] });
 }
 
 async function handleModal(interaction) {
-  const game = state.game;
+  if (!interaction.guild) {
+    return interaction.reply({ content: 'このフォームはサーバー内でのみ使用できます。', ephemeral: true });
+  }
+  const game = getGame(interaction.guild.id);
 
   // ▼ ゲスト追加
   if (interaction.customId === 'modal_guest') {
@@ -32,7 +35,7 @@ async function handleModal(interaction) {
       });
     }
     data.guests.push(...guestNames);
-    await refreshRecruitPanel(interaction);
+    await refreshRecruitPanel(interaction, game);
     return interaction.reply({
       content: `✅ ゲスト「${guestNames.join(', ')}」を追加しました！`,
       ephemeral: true,
@@ -50,7 +53,7 @@ async function handleModal(interaction) {
     game.settings.timeLimit = time;
     game.settings.oniTeamCount = oniCount;
     game.settings.teamSize = teamSize;
-    await refreshRecruitPanel(interaction);
+    await refreshRecruitPanel(interaction, game);
     return interaction.reply({
       content: '✅ 基本設定を保存し、募集パネルを更新しました。',
       ephemeral: true,
@@ -71,7 +74,7 @@ async function handleModal(interaction) {
     game.photoRemind.interval = photo;
     game.mission.intervalMin = min;
     game.mission.intervalMax = max;
-    await refreshRecruitPanel(interaction);
+    await refreshRecruitPanel(interaction, game);
     return interaction.reply({
       content: '✅ 通知/間隔設定を保存し、募集パネルを更新しました。',
       ephemeral: true,
@@ -107,7 +110,7 @@ async function handleModal(interaction) {
       if (runIdx !== -1) teamName = `🏃逃走者 ${runIdx + 1}班`;
     }
 
-    const controlCh = getControlChannel(interaction.guild);
+    const controlCh = getControlChannel(interaction.guild, game);
     if (controlCh) {
       await controlCh.send(
         `🪙 **ポイント付与！**\n**${teamName}** に **${points}pt** が付与されました！ (合計: ${game.points[teamId]}pt)`

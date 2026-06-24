@@ -1,7 +1,30 @@
 ================================================
 REAL ONIGOKKO BOT PROJECT BUNDLE
-Generated on: 3/24/2026, 6:29:30 PM
+Generated on: 6/24/2026, 9:57:18 AM
 ================================================
+
+
+################################################
+FILE: package.json
+################################################
+
+{
+  "name": "hide-and-seek",
+  "version": "1.0.0",
+  "description": "Discord上でリアル隠れ鬼ごっこの進行を総合的にサポートするために作られたBotです。参加者の募集から、複雑なチーム分け、専用チャンネルの自動生成、ゲーム中のイベント発生、結果発表と後片付けまで、ゲームのすべてを自動化・半自動化します。",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "dotenv": "^17.3.1"
+  }
+}
+
 
 
 ################################################
@@ -9,47 +32,33 @@ FILE: Dockerfile
 ################################################
 
 # -------------------------
-# 1. ビルド環境のステージ (依存関係のインストール用)
+# 1. ビルド環境のステージ
 # -------------------------
-# Node.jsのバージョンを指定
 FROM node:22 AS builder
-
-# 作業ディレクトリを /app に設定
 WORKDIR /app
 
-# app/ 内の package.json をコピーして依存をインストール
-# リポジトリのルートではなく app ディレクトリ配下に package.json がある構成に対応
-COPY app/package*.json ./
-
-# 依存関係をクリーンインストール
+# ルートの package.json をコピー
+COPY package*.json ./
 RUN npm ci
 
-# app ディレクトリ以下のソースを /app にコピー
-COPY app/ ./
+# ルートのファイルをすべてコピー
+COPY . .
 
 # -------------------------
-# 2. 実行環境のステージ (実際に動かす用)
+# 2. 実行環境のステージ
 # -------------------------
-
 FROM node:22-alpine
-
-# 作業ディレクトリを /app に設定
 WORKDIR /app
 
-# ビルドステージから、インストール済み node_modules と必要ファイルをコピー
-# 注意: セキュリティ上の理由で secrets（例: config.json / google-credentials.json）は .dockerignore により除外される想定です。
+# ビルドステージから必要なファイルをコピー
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/index.js ./index.js
+COPY --from=builder /app/src ./src
 COPY --from=builder /app/package.json ./package.json
 COPY start.sh ./start.sh
 
-# start.shに実行権限を付与
 RUN chmod +x ./start.sh
-
-# KoyebがPORT環境変数で指定するポートを開放する
 EXPOSE 8000
-
-# start.sh を実行してコンテナを起動
 CMD ["./start.sh"]
 
 
@@ -58,621 +67,75 @@ FILE: start.sh
 ################################################
 
 #!/bin/sh
-
-echo "--- start.shスクリプトを開始します ---"
-
-# 1. 環境変数が設定されているか確認
-echo "環境変数 GOOGLE_CREDENTIALS_BASE64 を確認中..."
-if [ -z "$GOOGLE_CREDENTIALS_BASE64" ]; then
-  echo "ERROR: GOOGLE_CREDENTIALS_BASE64 環境変数が空か、設定されていません！"
-  echo "KoyebのService設定 -> Environment variables を確認してください。"
-  exit 1 # ここでスクリプトをエラー終了させる
-else
-  echo "GOOGLE_CREDENTIALS_BASE64 は設定されています。長さ: ${#GOOGLE_CREDENTIALS_BASE64} 文字"
-fi
-
-# 2. 秘密のファイルを保存するディレクトリを作成
-echo "秘密ファイル用のディレクトリを作成中: /app/secrets"
-mkdir -p /app/secrets
-
-# ディレクトリが正常に作成されたか確認
-if [ -d "/app/secrets" ]; then
-  echo "ディレクトリ /app/secrets は正常に作成されました。"
-else
-  echo "ERROR: ディレクトリ /app/secrets の作成に失敗しました。"
-  exit 1
-fi
-
-# 3. Base64文字列をデコードしてファイルに書き出す
-FILE_PATH="/app/secrets/google-credentials.json"
-echo "Base64文字列をデコードし、ファイルに書き込み中: $FILE_PATH"
-
-# デコード処理を実行
-echo "$GOOGLE_CREDENTIALS_BASE64" | base64 -d > "$FILE_PATH"
-
-# 4. ファイルが正常に作成されたか確認
-if [ -f "$FILE_PATH" ]; then
-  echo "ファイル $FILE_PATH は正常に作成されました。"
-  echo "ファイルの権限と詳細情報:"
-  ls -l "$FILE_PATH" # ファイルの詳細情報を表示
-
-  echo "ファイルの先頭数行の内容:"
-  head -n 5 "$FILE_PATH" # ファイルの最初の5行を表示 (内容が正しいか確認)
-else
-  echo "ERROR: ファイル $FILE_PATH の作成に失敗しました。"
-  exit 1
-fi
-
-echo "--- start.shスクリプト完了。Node.jsアプリを起動します ---"
-
-# 準備が整ったらBotを起動する
+echo "Bot starting..."
 exec node index.js
 
 
 ################################################
-FILE: app/index.js
+FILE: index.js
 ################################################
 
-// ---------------------------------------------
-// ステップ1: 必要なライブラリをすべて読み込む
-// ---------------------------------------------
+// ==========================================
+// リアル隠れ鬼ごっこ Bot - エントリポイント
+// ==========================================
+require('dotenv').config();
 
-// discord.jsライブラリ
-const {
-  Client, GatewayIntentBits, Partials, REST, Routes, EmbedBuilder,
-  ApplicationCommandOptionType, PermissionsBitField, ChannelType,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
-} = require('discord.js');
-
-// Googleスプレッドシート連携ライブラリ
-const { JWT } = require('google-auth-library');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-
-// ヘルスチェック用Webサーバーライブラリ
+const { Client, REST, Routes } = require('discord.js');
 const http = require('http');
 
+const { INTENTS, PARTIALS, COMMANDS } = require('./src/config');
+const { handleSlashCommand } = require('./src/handlers/commands');
+const { handleButton } = require('./src/handlers/buttons');
+const { handleModal } = require('./src/handlers/modals');
+const { handleSelectMenu } = require('./src/handlers/selects');
 
-// ---------------------------------------------
-// ステップ2: 設定値や認証情報を読み込む
-// ---------------------------------------------
-
-// ★ 環境変数から設定を読み込む
 const clientId = process.env.DISCORD_CLIENT_ID;
 const token = process.env.DISCORD_TOKEN;
-const spreadsheetId = process.env.SPREADSHEET_ID;
 
-// ★ start.sh によって作成される認証情報ファイルを読み込む
-// このパスは start.sh で指定したパスと一致させる
-const creds = require('/app/secrets/google-credentials.json');
+const client = new Client({ intents: INTENTS, partials: PARTIALS });
 
-
-// ---------------------------------------------
-// ステップ3: 読み込んだ設定値を使ってセットアップ
-// ---------------------------------------------
-
-// --- Google Sheets API セットアップ ---
-const serviceAccountAuth = new JWT({
-  email: creds.client_email,
-  key: creds.private_key,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
-const doc = new GoogleSpreadsheet(spreadsheetId, serviceAccountAuth);
-
-// --- Discordボット本体の作成 ---
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildMembers,
-  ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
-});
-
-
-// ---------------------------------------------
-// ステップ4: Botのロジックを記述
-// ---------------------------------------------
-
-// --- ゲームの状態を管理する変数 ---
-let gameStatus = {
-  phase: 'idle',
-  participants: new Set(),
-  recruitmentMessageId: null,
-  teams: { oni: [], runner: [] },
-  points: {},
-  gameMasterId: null,
-  controlPanelMessageId: null,
-  timeLimit: 0,
-  gameTimer: null,
-  mission: {
-    enabled: false,
-    timer: null,
-    intervalMin: 5,
-    intervalMax: 15,
-  },
-  photoRemind: {
-    timer: null,
-    interval: 3,
-  },
-  gameChannelId: null,
-  createdChannelIds: [],
-  categoryChannelId: null,
-};
-
-
-// --- 設定値 ---
-const ONI_ROLE_NAME = '鬼';
-const RUNNER_ROLE_NAME = '逃走者';
-
-
-// --- スラッシュコマンドの定義 ---
-const commands = [
-  { name: 'ping', description: 'ボットが応答するかテストします。' },
-  {
-    name: 'game-recruit',
-    description: 'リアル隠れ鬼ごっこの参加者募集を開始します。',
-    options: [
-      { name: 'title', description: 'ゲームのタイトル', type: ApplicationCommandOptionType.String, required: true },
-      { name: 'description', description: 'ゲームの説明やルールなど', type: ApplicationCommandOptionType.String, required: false },
-    ],
-  },
-  {
-    name: 'game-set-teams',
-    description: '募集を締め切り、チーム分けと専用チャンネル作成を行います。',
-    options: [
-      { name: 'oni-team-count', description: '鬼チームの数を指定します。', type: ApplicationCommandOptionType.Integer, required: true, minValue: 1 },
-      { name: 'time-limit', description: 'ゲームの制限時間（分）を指定します。', type: ApplicationCommandOptionType.Integer, required: true, minValue: 1 },
-      { name: 'enable-missions', description: 'ゲーム中にミッションを発令するかどうか (デフォルト: OFF)', type: ApplicationCommandOptionType.Boolean, required: false },
-      { name: 'photo-remind-interval', description: '写真リマインドの間隔（分） (デフォルト: 3分)', type: ApplicationCommandOptionType.Integer, required: false, minValue: 1 },
-      { name: 'mission-interval-min', description: 'ミッション発令の最小間隔（分） (デフォルト: 5分)', type: ApplicationCommandOptionType.Integer, required: false, minValue: 1 },
-      { name: 'mission-interval-max', description: 'ミッション発令の最大間隔（分） (デフォルト: 15分)', type: ApplicationCommandOptionType.Integer, required: false, minValue: 1 },
-    ],
-  },
-  { name: 'game-end', description: '現在のゲームや募集を強制終了します。（管理者/ゲームマスター専用）' },
-];
-
-
-// --- スラッシュコマンドの登録 ---
-const rest = new REST({ version: '10' }).setToken(token);
-(async () => {
+// — スラッシュコマンド登録 —
+async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(token);
   try {
-    console.log('スラッシュコマンドの登録を更新します...');
-    await rest.put(Routes.applicationCommands(clientId), { body: commands });
-    console.log('スラッシュコマンドの登録が正常に完了しました。');
-  } catch (error) { console.error('スラッシュコマンドの登録中にエラー:', error); }
-})();
-
-
-// --- ボット起動時の処理 ---
-client.on('ready', () => { console.log(`${client.user.tag}としてログインしました！`); });
-
-
-// --- インタラクション受付 ---
-client.on('interactionCreate', async (interaction) => {
-  if (interaction.isChatInputCommand()) await handleSlashCommand(interaction);
-  else if (interaction.isButton()) await handleButton(interaction);
-  else if (interaction.isStringSelectMenu()) await handleSelectMenu(interaction);
-});
-
-// --- リアクション受付 ---
-client.on('messageReactionAdd', async (reaction, user) => {
-  if (user.bot || gameStatus.phase !== 'recruiting' || reaction.message.id !== gameStatus.recruitmentMessageId || reaction.emoji.name !== '👍') return;
-  gameStatus.participants.add(user.id);
-  await updateRecruitmentMessage(reaction.message);
-});
-client.on('messageReactionRemove', async (reaction, user) => {
-  if (user.bot || gameStatus.phase !== 'recruiting' || reaction.message.id !== gameStatus.recruitmentMessageId || reaction.emoji.name !== '👍') return;
-  gameStatus.participants.delete(user.id);
-  await updateRecruitmentMessage(reaction.message);
-});
-
-
-// --- スラッシュコマンド処理 ---
-async function handleSlashCommand(interaction) {
-  const { commandName } = interaction;
-
-  if (commandName === 'ping') {
-    await interaction.reply('Pong!');
-  }
-
-  if (commandName === 'game-recruit') {
-    if (gameStatus.phase !== 'idle') {
-      return interaction.reply({ content: '現在、他のゲームが進行中または募集中です。', ephemeral: true });
-    }
-    gameStatus.phase = 'recruiting';
-    gameStatus.participants.clear();
-    const title = interaction.options.getString('title');
-    const description = interaction.options.getString('description') || '奮ってご参加ください！';
-    const recruitEmbed = new EmbedBuilder().setColor(0x0099FF).setTitle(`【参加者募集中】${title}`).setDescription(description).addFields({ name: '参加方法', value: 'このメッセージに👍リアクションを付けてください！' }, { name: '現在の参加者', value: '0人' }).setFooter({ text: 'リアル隠れ鬼ごっこBot' });
-    const sentMessage = await interaction.reply({ embeds: [recruitEmbed], fetchReply: true });
-    gameStatus.recruitmentMessageId = sentMessage.id;
-    await sentMessage.react('👍');
-  }
-
-  if (commandName === 'game-set-teams') {
-    if (gameStatus.phase !== 'recruiting') {
-      return interaction.reply({ content: '現在、参加者募集中ではありません。', ephemeral: true });
-    }
-    if (gameStatus.participants.size < 2) {
-      return interaction.reply({ content: `参加者が2人未満のため、ゲームを開始できません。`, ephemeral: true });
-    }
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ content: 'このコマンドはサーバー管理者のみ実行できます。', ephemeral: true });
-    }
-
-    await interaction.deferReply({ content: 'チーム分けと専用チャンネルの作成を開始します...' });
-
-    const participantsArray = Array.from(gameStatus.participants);
-    const shuffledParticipants = participantsArray.sort(() => Math.random() - 0.5);
-    const oniTeamCount = interaction.options.getInteger('oni-team-count');
-    let teams = [];
-    let tempTeam = [];
-    for (const pId of shuffledParticipants) {
-      tempTeam.push(pId);
-      if (tempTeam.length === 2) {
-        teams.push(tempTeam);
-        tempTeam = [];
-      }
-    }
-    if (tempTeam.length > 0) {
-      if (teams.length > 0) {
-        teams[teams.length - 1].push(tempTeam[0]);
-      } else {
-        teams.push(tempTeam);
-      }
-    }
-    if (oniTeamCount >= teams.length) {
-      return interaction.followUp({ content: `鬼チームの数が多すぎます。チームの総数は${teams.length}です。`, ephemeral: true });
-    }
-    gameStatus.teams.oni = teams.slice(0, oniTeamCount);
-    gameStatus.teams.runner = teams.slice(oniTeamCount);
-
-    const guild = interaction.guild;
-    const oniRole = await getOrCreateRole(guild, ONI_ROLE_NAME, 'Red');
-    const runnerRole = await getOrCreateRole(guild, RUNNER_ROLE_NAME, 'Blue');
-    for (const team of gameStatus.teams.oni) {
-      for (const mId of team) {
-        (await guild.members.fetch(mId)).roles.add(oniRole);
-      }
-    }
-    for (const team of gameStatus.teams.runner) {
-      for (const mId of team) {
-        (await guild.members.fetch(mId)).roles.add(runnerRole);
-      }
-    }
-
-    await createTeamChannels(guild);
-
-    gameStatus.points = {};
-    gameStatus.teams.oni.forEach((_, i) => gameStatus.points[`oni-${i}`] = 0);
-    gameStatus.teams.runner.forEach((_, i) => gameStatus.points[`runner-${i}`] = 0);
-    
-    gameStatus.mission.enabled = interaction.options.getBoolean('enable-missions') || false;
-    gameStatus.photoRemind.interval = interaction.options.getInteger('photo-remind-interval') || 3;
-    const minInterval = interaction.options.getInteger('mission-interval-min') || 5;
-    const maxInterval = interaction.options.getInteger('mission-interval-max') || 15;
-    if (minInterval > maxInterval) {
-      return interaction.followUp({ content: 'ミッションの最小間隔は最大間隔より大きい値にできません。', ephemeral: true });
-    }
-    gameStatus.mission.intervalMin = minInterval;
-    gameStatus.mission.intervalMax = maxInterval;
-
-    const teamsEmbed = new EmbedBuilder().setColor(0xFFFF00).setTitle('チーム分け完了 & 専用チャンネル作成！').setDescription('各チームの専用チャンネルで、作戦会議をしてください！\nゲームマスターがコントロールパネルからゲームを開始します。');
-    gameStatus.teams.oni.forEach((t, i) => teamsEmbed.addFields({ name: `鬼チーム ${i + 1}`, value: t.map(id => `<@${id}>`).join('\n'), inline: true }));
-    gameStatus.teams.runner.forEach((t, i) => teamsEmbed.addFields({ name: `逃走者チーム ${i + 1}`, value: t.map(id => `<@${id}>`).join('\n'), inline: true }));
-
-    await interaction.editReply({ content: '', embeds: [teamsEmbed] });
-
-    gameStatus.phase = 'ready';
-    gameStatus.gameMasterId = interaction.user.id;
-    gameStatus.timeLimit = interaction.options.getInteger('time-limit');
-    gameStatus.gameChannelId = interaction.channelId;
-    await sendControlPanel(interaction.channel);
-  }
-
-  if (commandName === 'game-end') {
-    if (gameStatus.phase === 'idle') {
-      return interaction.reply({ content: '現在、アクティブなゲームや募集はありません。', ephemeral: true });
-    }
-
-    if (gameStatus.phase === 'recruiting') {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return interaction.reply({ content: '募集をキャンセルできるのはサーバー管理者だけです。', ephemeral: true });
-        }
-    } else {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator) && interaction.user.id !== gameStatus.gameMasterId) {
-            return interaction.reply({ content: 'アクションを終了できるのは、サーバー管理者またはゲームを開始した本人だけです。', ephemeral: true });
-        }
-    }
-
-    if (gameStatus.phase === 'recruiting') {
-      await interaction.reply('募集をキャンセルします...');
-      const recruitmentMessage = await interaction.channel.messages.fetch(gameStatus.recruitmentMessageId).catch(() => null);
-      await endGame(interaction.guild, interaction.channel, 'ゲームマスターにより募集がキャンセルされました。', recruitmentMessage);
-    } else {
-      await interaction.reply('ゲームを強制終了します...');
-      await endGame(interaction.guild, interaction.channel, 'ゲームマスターによりゲームが強制終了されました。');
-    }
-  }
-}
-
-// --- ボタン処理 ---
-async function handleButton(interaction) {
-  const { customId } = interaction;
-
-  if (customId === 'start_game_button') {
-    if (interaction.user.id !== gameStatus.gameMasterId) {
-      return interaction.reply({ content: 'ゲームマスターのみがゲームを開始できます。', ephemeral: true });
-    }
-    if (gameStatus.phase !== 'ready') {
-      return interaction.reply({ content: 'ゲームは準備完了状態ではありません。', ephemeral: true });
-    }
-
-    gameStatus.phase = 'playing';
-
-    const panelMsg = await interaction.channel.messages.fetch(gameStatus.controlPanelMessageId);
-    const startButton = new ButtonBuilder().setCustomId('start_game_button').setLabel('▶️ ゲーム開始').setStyle(ButtonStyle.Success).setDisabled(true);
-    const catchButton = ButtonBuilder.from(panelMsg.components[0].components[1]);
-    const row = new ActionRowBuilder().addComponents(startButton, catchButton);
-    await panelMsg.edit({ components: [row] });
-
-    await interaction.reply(`**${interaction.user.displayName}** がゲームを開始しました！ 制限時間は **${gameStatus.timeLimit}分** です！`);
-
-    gameStatus.gameTimer = setTimeout(() => {
-      endGame(interaction.guild, interaction.channel, '時間切れによりゲームが終了しました！');
-    }, gameStatus.timeLimit * 60 * 1000);
-    if (gameStatus.mission.enabled) {
-      startMissionTimer(interaction.guild);
-    }
-    startPhotoRemindTimer(interaction.guild);
-  }
-
-  if (customId === 'catch_button') {
-    if (gameStatus.phase !== 'playing') {
-      return interaction.reply({ content: 'ゲームが開始されていません。', ephemeral: true });
-    }
-    const executor = interaction.member;
-    if (!executor.roles.cache.some(r => r.name === ONI_ROLE_NAME)) {
-      return interaction.reply({ content: 'このボタンは鬼チームのメンバーしか使用できません。', ephemeral: true });
-    }
-    const allRunners = gameStatus.teams.runner.flat();
-    if (allRunners.length === 0) {
-      return interaction.reply({ content: '捕獲対象の逃走者がいません。', ephemeral: true });
-    }
-
-    const selectMenu = new StringSelectMenuBuilder().setCustomId('catch_select_menu').setPlaceholder('捕まえた逃走者を選択').addOptions(allRunners.map(rId => { const m = interaction.guild.members.cache.get(rId); return { label: m ? m.displayName : `不明 (${rId})`, value: rId }; }));
-    const row = new ActionRowBuilder().addComponents(selectMenu);
-    await interaction.reply({ content: '誰を捕まえましたか？', components: [row], ephemeral: true });
-  }
-}
-
-// --- ドロップダウンメニュー処理 ---
-async function handleSelectMenu(interaction) {
-  if (interaction.customId === 'catch_select_menu') {
-    const targetId = interaction.values[0];
-    const target = await interaction.guild.members.fetch(targetId);
-
-    const oniRole = await getOrCreateRole(interaction.guild, ONI_ROLE_NAME);
-    const runnerRole = await getOrCreateRole(interaction.guild, RUNNER_ROLE_NAME);
-    await target.roles.remove(runnerRole);
-    await target.roles.add(oniRole);
-
-    gameStatus.teams.runner = gameStatus.teams.runner.map(t => t.filter(id => id !== targetId)).filter(t => t.length > 0);
-    if (gameStatus.teams.oni.length > 0) {
-      gameStatus.teams.oni[0].push(targetId);
-    } else {
-      gameStatus.teams.oni.push([targetId]);
-    }
-
-    const pointValue = 100;
-    const oniTeamId = findTeamIdByMember(interaction.user.id, 'oni');
-    if (oniTeamId) {
-      gameStatus.points[oniTeamId] = (gameStatus.points[oniTeamId] || 0) + pointValue;
-    }
-
-    await interaction.update({ content: `**${target.displayName}** を捕獲したことを記録しました！`, components: [] });
-
-  // 鬼と逃走者のロールをメンションする文字列を作成（既に getOrCreateRole で取得済みの変数を使用）
-  const mentionText = `${oniRole ? `<@&${oniRole.id}>` : '@鬼'} ${runnerRole ? `<@&${runnerRole.id}>` : '@逃走者'}`;
-
-        await interaction.channel.send({
-            content: mentionText,
-            // ★ Embedを使って見やすくする（任意ですが推奨）
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0xFF4500) // オレンジレッド
-                    .setDescription(`**${interaction.member.displayName}** が **${target.displayName}** を捕獲した！\n(${oniTeamId}に +${pointValue} pt)`)
-            ]
-        });
-
-    if (gameStatus.teams.runner.flat().length === 0) {
-      await endGame(interaction.guild, interaction.channel, '全ての逃走者が捕まりました！鬼チームの勝利です！');
-    }
-  }
-}
-
-
-// --- ユーティリティ関数 ---
-
-function startMissionTimer(guild) {
-  const interval = (Math.floor(Math.random() * (gameStatus.mission.intervalMax - gameStatus.mission.intervalMin + 1)) + gameStatus.mission.intervalMin) * 60 * 1000;
-  gameStatus.mission.timer = setTimeout(async () => {
-    if (gameStatus.phase !== 'playing') return;
-    await issueMission(guild);
-    startMissionTimer(guild);
-  }, interval);
-}
-
-async function issueMission(guild) {
-  try {
-    await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
-    const rows = await sheet.getRows();
-    const availableMissions = rows.filter(row => row.get('used') !== 'TRUE');
-    if (availableMissions.length === 0) {
-      console.log('発令できるミッションがありません。');
-      return;
-    }
-
-    const missionRow = availableMissions[Math.floor(Math.random() * availableMissions.length)];
-    const missionContent = missionRow.get('content');
-    const missionPoints = missionRow.get('points');
-
-    const missionEmbed = new EmbedBuilder().setColor(0xFFA500).setTitle('🚨 緊急ミッション発令！ 🚨').setDescription(missionContent).addFields({ name: '達成報酬', value: `${missionPoints} ポイント` }).setFooter({ text: '達成はゲームマスターに口頭で報告してください。' });
-    
-    if (gameStatus.gameChannelId) {
-        const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
-        if (mainChannel) {
-      // 逃走者ロールを取得（存在すればメンション用にIDを使う）
-      const runnerRole = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
-      await mainChannel.send({
-        content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
-        embeds: [missionEmbed]
-      });
-            console.log(`ミッションを #${mainChannel.name} に発令しました: ${missionContent}`);
-        }
-    }
-
-    missionRow.set('used', 'TRUE');
-    await missionRow.save();
+    await rest.put(Routes.applicationCommands(clientId), { body: COMMANDS });
+    console.log('コマンド登録完了。');
   } catch (error) {
-    console.error('ミッションの発令に失敗しました:', error);
+    console.error('コマンド登録に失敗しました:', error);
   }
 }
 
-function startPhotoRemindTimer(guild) {
-  gameStatus.photoRemind.timer = setInterval(async () => {
-    if (gameStatus.phase !== 'playing') {
-      clearInterval(gameStatus.photoRemind.timer);
-      return;
-    }
+client.once('ready', () => {
+  console.log(`${client.user.tag}としてログインしました！`);
+});
 
-    const remindEmbed = new EmbedBuilder().setColor(0xADD8E6).setTitle('📸 写真提出リマインド 📸').setDescription('現在地のヒントとなる写真を、いずれかのチャンネルに投稿してください！');
-    
-    if (gameStatus.gameChannelId) {
-        const mainChannel = guild.channels.cache.get(gameStatus.gameChannelId);
-        if (mainChannel) {
-      // 逃走者ロールを取得（存在すればメンション用にIDを使う）
-      const runnerRole = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
-      await mainChannel.send({
-        content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
-        embeds: [remindEmbed]
-      });
-            console.log(`写真提出リマインドを #${mainChannel.name} に送信しました。`);
-        }
-    }
-  }, gameStatus.photoRemind.interval * 60 * 1000);
-}
-
-async function createTeamChannels(guild) {
-  const category = await guild.channels.create({ name: '👹リアル鬼ごっこ', type: ChannelType.GuildCategory });
-  gameStatus.categoryChannelId = category.id;
-  const allTeams = [...gameStatus.teams.oni.map((t, i) => ({ n: `鬼チーム-${i + 1}`, m: t })), ...gameStatus.teams.runner.map((t, i) => ({ n: `逃走者チーム-${i + 1}`, m: t }))];
-  for (const team of allTeams) {
-    const pO = [{ id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }, { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel] }, ...team.m.map(mId => ({ id: mId, allow: [PermissionsBitField.Flags.ViewChannel] }))];
-    const txtCh = await guild.channels.create({ name: team.n, type: ChannelType.GuildText, parent: category.id, permissionOverwrites: pO }); gameStatus.createdChannelIds.push(txtCh.id);
-    const vcCh = await guild.channels.create({ name: team.n, type: ChannelType.GuildVoice, parent: category.id, permissionOverwrites: pO }); gameStatus.createdChannelIds.push(vcCh.id);
-    await txtCh.send(`${team.m.map(id => `<@${id}>`).join(' ')} こちらがあなたたちのチームチャンネルです！`);
-  }
-}
-
-async function sendControlPanel(channel) {
-  const embed = new EmbedBuilder().setColor(0x5865F2).setTitle('ゲームコントロールパネル').setDescription('ここからゲームの操作ができます。');
-  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('start_game_button').setLabel('▶️ ゲーム開始').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId('catch_button').setLabel('🤚 捕獲報告').setStyle(ButtonStyle.Primary));
-  const sentMessage = await channel.send({ embeds: [embed], components: [row] });
-  gameStatus.controlPanelMessageId = sentMessage.id;
-}
-
-async function updateRecruitmentMessage(message) {
+// — インタラクションの振り分け —
+client.on('interactionCreate', async (interaction) => {
   try {
-    await message.fetch(); const originalEmbed = message.embeds[0]; if (!originalEmbed) return;
-    let pList = 'まだいません'; if (gameStatus.participants.size > 0) { pList = Array.from(gameStatus.participants).map(uId => `<@${uId}>`).join('\n'); }
-    const updatedEmbed = EmbedBuilder.from(originalEmbed).setFields({ name: '参加方法', value: 'このメッセージに👍リアクションを付けてください！' }, { name: `現在の参加者 (${gameStatus.participants.size}人)`, value: pList });
-    await message.edit({ embeds: [updatedEmbed] });
-  } catch(error) { console.error("募集メッセージの更新に失敗:", error); }
-}
-
-async function endGame(guild, channel, reason, recruitmentMessage = null) {
-  if (gameStatus.phase === 'idle') return;
-
-  if (recruitmentMessage) {
-    const canceledEmbed = new EmbedBuilder().setColor(0x808080).setTitle('募集キャンセル').setDescription('このゲームの募集はキャンセルされました。');
-    await recruitmentMessage.edit({ embeds: [canceledEmbed], components: [] }).catch(console.error);
-    await recruitmentMessage.reactions.removeAll().catch(err => console.error('リアクションの削除に失敗:', err));
-  }
-
-  const wasPlaying = (gameStatus.phase === 'playing');
-  
-  gameStatus.phase = 'idle';
-  console.log('ゲーム/募集を終了します...');
-
-  if (gameStatus.gameTimer) clearTimeout(gameStatus.gameTimer);
-  if (gameStatus.mission.timer) clearTimeout(gameStatus.mission.timer);
-  if (gameStatus.photoRemind.timer) clearInterval(gameStatus.photoRemind.timer);
-
-  if (gameStatus.controlPanelMessageId && channel) { try { const pMsg = await channel.messages.fetch(gameStatus.controlPanelMessageId); const dComps = pMsg.components.map(r => { const nR = ActionRowBuilder.from(r); nR.components.forEach(c => c.setDisabled(true)); return nR; }); await pMsg.edit({ components: dComps }); } catch (e) { console.error('コントロールパネルの無効化に失敗:', e); } }
-
-  const oniRole = guild.roles.cache.find(r => r.name === ONI_ROLE_NAME);
-  const runnerRole = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
-  for (const mId of gameStatus.participants) { try { const m = await guild.members.fetch(mId); if (oniRole) m.roles.remove(oniRole).catch(console.error); if (runnerRole) m.roles.remove(runnerRole).catch(console.error); } catch (e) { console.error(`${mId} のロール剥奪失敗。`, e.message); } }
-
-  for (const chId of gameStatus.createdChannelIds) { const ch = guild.channels.cache.get(chId); if (ch) ch.delete('ゲーム終了').catch(e => console.error(`${ch.name}の削除失敗:`, e.message)); }
-  if (gameStatus.categoryChannelId) { const cat = guild.channels.cache.get(gameStatus.categoryChannelId); if (cat) cat.delete('ゲーム終了').catch(e => console.error(`カテゴリの削除失敗:`, e.message)); }
-
-  // ★ ロール剥奪の前にメンション用のロールオブジェクトを取得しておく
-  const oniRoleForMention = guild.roles.cache.find(r => r.name === ONI_ROLE_NAME);
-  const runnerRoleForMention = guild.roles.cache.find(r => r.name === RUNNER_ROLE_NAME);
-
-  // ★ メンション用の文字列を作成（存在する場合は <@&id> 形式でメンション）
-  const mentionText = `${oniRoleForMention ? `<@&${oniRoleForMention.id}>` : '@鬼'} ${runnerRoleForMention ? `<@&${runnerRoleForMention.id}>` : '@逃走者'}`;
-
-  if (channel && wasPlaying) {
-    const resultEmbed = new EmbedBuilder()
-      // ...
-    await channel.send({ content: mentionText, embeds: [resultEmbed] });
-  } else if (channel) {
-    const endEmbed = new EmbedBuilder().setColor(0x808080).setTitle('ゲーム終了').setDescription(reason);
-    await channel.send({ content: mentionText, embeds: [endEmbed] });
-  }
-
-  gameStatus = {
-    phase: 'idle', participants: new Set(), recruitmentMessageId: null,
-    teams: { oni: [], runner: [] }, points: {}, gameMasterId: null, controlPanelMessageId: null,
-    timeLimit: 0, gameTimer: null, mission: { enabled: false, timer: null, intervalMin: 5, intervalMax: 15 },
-    photoRemind: { timer: null, interval: 3 }, gameChannelId: null, createdChannelIds: [], categoryChannelId: null,
-  };
-  console.log('ゲーム状態をリセットしました。');
-}
-
-async function getOrCreateRole(guild, roleName, color) {
-  let role = guild.roles.cache.find(r => r.name === roleName);
-  if (!role) {
-    role = await guild.roles.create({ name: roleName, color, reason: '鬼ごっこ用ロール' });
-  }
-  return role;
-}
-
-function findTeamIdByMember(memberId, role) {
-  const teams = gameStatus.teams[role];
-  for (let i = 0; i < teams.length; i++) {
-    if (teams[i].includes(memberId)) {
-      return `${role}-${i}`;
+    if (interaction.isChatInputCommand()) await handleSlashCommand(interaction);
+    else if (interaction.isButton()) await handleButton(interaction);
+    else if (interaction.isModalSubmit()) await handleModal(interaction);
+    else if (interaction.isStringSelectMenu()) await handleSelectMenu(interaction);
+  } catch (err) {
+    console.error('InteractionError:', err);
+    try {
+      const msg = { content: '⚠️ エラーが発生しました。もう一度試してください。', ephemeral: true };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(msg).catch(() => {});
+      } else {
+        await interaction.reply(msg).catch(() => {});
+      }
+    } catch (_) {
+      /* 応答不能なら無視 */
     }
   }
-  return null;
-}
+});
 
-
-// ---------------------------------------------
-// ステップ5: Botを起動する
-// ---------------------------------------------
-
-// --- ボットをDiscordにログインさせる ---
+// — 起動 —
+registerCommands();
 client.login(token);
 
-// --- Koyeb ヘルスチェック用の軽量Webサーバー ---
+// — ヘルスチェック用 HTTP サーバ —
 const server = http.createServer((req, res) => {
   if (client.isReady()) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -682,9 +145,1525 @@ const server = http.createServer((req, res) => {
     res.end('Bot is not ready.\n');
   }
 });
-
-const port = process.env.PORT || 8000;
-server.listen(port, () => {
-  console.log(`Health check server listening on port ${port}`);
+server.listen(process.env.PORT || 8000, () => {
+  console.log(`Health check server listening on port ${process.env.PORT || 8000}`);
 });
+
+
+
+################################################
+FILE: src/config.js
+################################################
+
+// ==========================================
+// 定数・コマンド定義
+// ==========================================
+const { GatewayIntentBits, Partials } = require('discord.js');
+
+// ロール名
+const ONI_ROLE_NAME = '鬼';
+const RUNNER_ROLE_NAME = '逃走者';
+
+// チャンネル/カテゴリ名（全箇所でこの定数を参照する）
+const CHANNELS = {
+  CATEGORY: '👹リアル鬼ごっこ',
+  CONTROL: '📢全体連絡',
+  PHOTO: '📸写真共有',
+  ONI_TEXT: '👹鬼陣営-作戦室',
+  ONI_VC: '🔊鬼陣営',
+  RUN_TEXT: '🏃逃走者陣営-作戦室',
+  RUN_VC: '🔊逃走者陣営',
+};
+
+// Embed カラー
+const COLORS = {
+  RECRUIT: 0x0099ff,
+  WELCOME: 0x00ff00,
+  PLAYING: 0xff0000,
+  PANEL: 0x5865f2,
+  MISSION: 0xffa500,
+  PHOTO: 0xadd8e6,
+  END: 0x808080,
+};
+
+// Discord Client のインテント設定
+const INTENTS = [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildMembers,
+];
+
+const PARTIALS = [Partials.Message, Partials.Channel];
+
+// スラッシュコマンド定義
+const COMMANDS = [
+  { name: 'ping', description: 'ボットの応答テスト' },
+  { name: 'welcome', description: 'このボットの使い方・マニュアルを表示します。' },
+  { name: 'game-recruit', description: 'リアル隠れ鬼ごっこの参加者募集パネルを表示します。' },
+  { name: 'game-end', description: '現在のゲームや募集を強制終了します（ホスト/管理者用）' },
+];
+
+module.exports = {
+  ONI_ROLE_NAME,
+  RUNNER_ROLE_NAME,
+  CHANNELS,
+  COLORS,
+  INTENTS,
+  PARTIALS,
+  COMMANDS,
+};
+
+
+
+################################################
+FILE: src/game/lifecycle.js
+################################################
+
+// ==========================================
+// ゲーム終了処理
+// ==========================================
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { state } = require('../state');
+const { ONI_ROLE_NAME, RUNNER_ROLE_NAME, COLORS } = require('../config');
+
+// 進行中の全タイマーを停止
+function clearAllTimers() {
+  const game = state.game;
+  if (game.gameTimer) clearTimeout(game.gameTimer);
+  if (game.mission.timer) clearTimeout(game.mission.timer);
+  if (game.photoRemind.timer) clearInterval(game.photoRemind.timer);
+  game.gameTimer = null;
+  game.mission.timer = null;
+  game.photoRemind.timer = null;
+}
+
+async function endGame(guild, channel, reason) {
+  const game = state.game;
+  game.phase = 'postgame';
+  clearAllTimers();
+
+  // コントロールパネルのボタンを無効化
+  if (game.controlPanelMessageId && channel) {
+    try {
+      const pMsg = await channel.messages.fetch(game.controlPanelMessageId);
+      const disabledRows = pMsg.components.map((row) => {
+        const newRow = ActionRowBuilder.from(row);
+        newRow.components.forEach((c) => c.setDisabled(true));
+        return newRow;
+      });
+      await pMsg.edit({ components: disabledRows });
+    } catch (e) {
+      /* パネルが消えている場合は無視 */
+    }
+  }
+
+  if (!channel) return;
+
+  const pointResults = [];
+  game.teams.oni.forEach((t, i) =>
+    pointResults.push({
+      name: `👹鬼 ${i + 1}班`,
+      points: game.points[t.id] || 0,
+      members: t.displayMembers.join(', '),
+    })
+  );
+  game.teams.runner.forEach((t, i) =>
+    pointResults.push({
+      name: `🏃逃走者 ${i + 1}班`,
+      points: game.points[t.id] || 0,
+      members: t.displayMembers.join(', '),
+    })
+  );
+  pointResults.sort((a, b) => b.points - a.points);
+
+  let rankingText = pointResults
+    .map((r, i) => `**${i + 1}位:** ${r.name} (${r.points}pt)\n└ ${r.members}`)
+    .join('\n\n');
+  if (!rankingText) rankingText = '参加者がいませんでした。';
+
+  const oniRole = guild.roles.cache.find((r) => r.name === ONI_ROLE_NAME);
+  const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+  const mentionText = `${oniRole ? `<@&${oniRole.id}>` : '@鬼'} ${
+    runnerRole ? `<@&${runnerRole.id}>` : '@逃走者'
+  }`;
+
+  const endEmbed = new EmbedBuilder()
+    .setColor(COLORS.END)
+    .setTitle('🏁 ゲーム終了')
+    .setDescription(
+      `${reason}\n\n🏆 **最終ポイントランキング** 🏆\n${rankingText}\n\n**次のアクション（コンティニュー・終了）を選択してください：**`
+    );
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_cont_same').setLabel('🔄 同じチームで再戦').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('btn_cont_shuffle').setLabel('🔀 チームを変えて再戦').setStyle(ButtonStyle.Primary)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_end_keep').setLabel('♻️ 終了 (チャンネル残す)').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_end_cleanup').setLabel('🗑️ 終了＆クリーンアップ').setStyle(ButtonStyle.Danger)
+  );
+
+  await channel.send({ content: mentionText, embeds: [endEmbed], components: [row1, row2] });
+}
+
+module.exports = { endGame, clearAllTimers };
+
+
+
+################################################
+FILE: src/game/missions.js
+################################################
+
+// ==========================================
+// ミッション・写真リマインドのタイマー
+// ==========================================
+const { EmbedBuilder } = require('discord.js');
+const { state } = require('../state');
+const { RUNNER_ROLE_NAME, COLORS } = require('../config');
+const { getControlChannel } = require('../utils/discord');
+
+// ミッションタイマー開始（既に稼働中なら何もしない＝多重起動防止）
+function startMissionTimer(guild) {
+  if (state.game.mission.timer) return;
+  scheduleNextMission(guild);
+}
+
+function scheduleNextMission(guild) {
+  const m = state.game.mission;
+  const intervalMs =
+    (Math.floor(Math.random() * (m.intervalMax - m.intervalMin + 1)) + m.intervalMin) * 60 * 1000;
+
+  m.timer = setTimeout(async () => {
+    m.timer = null;
+    if (state.game.phase !== 'playing') return;
+    // 発令タイミングで enabled を判定（途中ON/OFFに追従）
+    if (m.enabled) await issueMission(guild);
+    scheduleNextMission(guild);
+  }, intervalMs);
+}
+
+async function issueMission(guild) {
+  const m = state.game.mission;
+  let missionContent;
+  if (m.customMissions.length > 0) {
+    missionContent = m.customMissions.shift();
+  } else {
+    missionContent = m.defaultMissions[Math.floor(Math.random() * m.defaultMissions.length)];
+  }
+
+  const controlCh = getControlChannel(guild);
+  if (!controlCh) return;
+  const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+  const embed = new EmbedBuilder()
+    .setColor(COLORS.MISSION)
+    .setTitle('🚨 緊急ミッション発令！ 🚨')
+    .setDescription(missionContent)
+    .setFooter({ text: '達成できたら写真共有チャンネルに投稿しよう！' });
+  await controlCh.send({ content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者', embeds: [embed] });
+}
+
+function startPhotoRemindTimer(guild) {
+  if (state.game.photoRemind.timer) return;
+  state.game.photoRemind.timer = setInterval(async () => {
+    if (state.game.phase !== 'playing') return;
+    const controlCh = getControlChannel(guild);
+    if (!controlCh) return;
+    const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.PHOTO)
+      .setTitle('📸 写真提出リマインド')
+      .setDescription('現在地のヒントとなる写真を「📸写真共有」チャンネルに投稿してください！');
+    await controlCh.send({
+      content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
+      embeds: [embed],
+    });
+  }, state.game.photoRemind.interval * 60 * 1000);
+}
+
+module.exports = { startMissionTimer, issueMission, startPhotoRemindTimer };
+
+
+
+################################################
+FILE: src/game/teams.js
+################################################
+
+// ==========================================
+// チーム編成・チャンネル生成
+// ==========================================
+const { PermissionsBitField, ChannelType } = require('discord.js');
+const { state } = require('../state');
+const { CHANNELS, ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
+const { getOrCreateRole, getControlChannel, findGameChannel } = require('../utils/discord');
+
+// ペア固定を考慮してチームを抽選し、ロールを付与する
+async function performTeamShuffle(guild) {
+  const game = state.game;
+  const handled = new Set();
+  const groups = [];
+
+  // ペアで繋がった参加者を1グループにまとめる（連結成分）
+  for (const [id] of game.participants.entries()) {
+    if (handled.has(id)) continue;
+    const queue = [id];
+    const currentDiscordIds = [];
+    const currentGuests = [];
+
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      if (handled.has(curr)) continue;
+      handled.add(curr);
+
+      const pData = game.participants.get(curr);
+      if (!pData) continue;
+      currentDiscordIds.push(curr);
+      currentGuests.push(...pData.guests);
+
+      for (const pairId of pData.pairedWith) {
+        if (!handled.has(pairId)) queue.push(pairId);
+      }
+    }
+    groups.push({ discordIds: currentDiscordIds, guests: currentGuests });
+  }
+
+  groups.sort(() => Math.random() - 0.5);
+
+  const allTeams = [];
+  let currentTeam = { discordIds: [], guests: [], displayMembers: [] };
+  let currentSize = 0;
+  const teamSizeLimit = game.settings.teamSize || 3;
+
+  const flushTeam = () => {
+    allTeams.push({
+      id: `team-${Date.now()}-${allTeams.length}`,
+      discordIds: [...currentTeam.discordIds],
+      displayMembers: [...currentTeam.displayMembers],
+    });
+    currentTeam = { discordIds: [], guests: [], displayMembers: [] };
+    currentSize = 0;
+  };
+
+  for (const g of groups) {
+    const members = g.discordIds.map((id) => `<@${id}>`);
+    g.guests.forEach((guest) => members.push(`(ゲスト)${guest}`));
+    const gSize = g.discordIds.length + g.guests.length;
+
+    currentTeam.discordIds.push(...g.discordIds);
+    currentTeam.guests.push(...g.guests);
+    currentTeam.displayMembers.push(...members);
+    currentSize += gSize;
+
+    if (currentSize >= teamSizeLimit) flushTeam();
+  }
+  if (currentSize > 0) flushTeam();
+
+  const oniCount = game.settings.oniTeamCount;
+  if (allTeams.length <= oniCount) {
+    return {
+      success: false,
+      message: `作成された総チーム数(${allTeams.length}) に対して、鬼の指定数(${oniCount}) が多すぎます。人数設定や鬼の数を見直してください。`,
+    };
+  }
+
+  game.teams.oni = allTeams.slice(0, oniCount);
+  game.teams.runner = allTeams.slice(oniCount);
+  // ディープコピーで初期編成を保存（Map/Set を含まないので JSON で安全）
+  game.initialTeams = JSON.parse(
+    JSON.stringify({ oni: game.teams.oni, runner: game.teams.runner })
+  );
+
+  const oniRole = await getOrCreateRole(guild, ONI_ROLE_NAME, 'Red');
+  const runnerRole = await getOrCreateRole(guild, RUNNER_ROLE_NAME, 'Blue');
+
+  for (const team of game.teams.oni) {
+    for (const dId of team.discordIds) {
+      const m = await guild.members.fetch(dId).catch(() => null);
+      if (m) await m.roles.add(oniRole).catch(() => {});
+    }
+  }
+  for (const team of game.teams.runner) {
+    for (const dId of team.discordIds) {
+      const m = await guild.members.fetch(dId).catch(() => null);
+      if (m) await m.roles.add(runnerRole).catch(() => {});
+    }
+  }
+
+  return { success: true, roles: { oniRole, runnerRole } };
+}
+
+// 各チャンネルの権限オーバーライトを構築
+function buildOverwrites(guild, allowedRoleIds) {
+  const overwrites = [
+    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+    { id: guild.client.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+  ];
+  for (const roleId of allowedRoleIds) {
+    overwrites.push({ id: roleId, allow: [PermissionsBitField.Flags.ViewChannel] });
+  }
+  return overwrites;
+}
+
+// チーム分け＋専用チャンネル一式を用意する
+async function setupTeamsAndChannels(guild) {
+  const shuffleResult = await performTeamShuffle(guild);
+  if (!shuffleResult.success) return shuffleResult;
+
+  const { oniRole, runnerRole } = shuffleResult.roles;
+  state.game.phase = 'ready';
+
+  let category = guild.channels.cache.get(state.game.categoryChannelId);
+  if (!category) {
+    category = await guild.channels.create({
+      name: CHANNELS.CATEGORY,
+      type: ChannelType.GuildCategory,
+    });
+    state.game.categoryChannelId = category.id;
+  }
+
+  // 全体連絡（全員閲覧可）
+  let controlCh = findGameChannel(guild, CHANNELS.CONTROL);
+  if (!controlCh) {
+    controlCh = await guild.channels.create({
+      name: CHANNELS.CONTROL,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages],
+        },
+      ],
+    });
+  }
+
+  // 写真共有（鬼・逃走者のみ）
+  let photoCh = findGameChannel(guild, CHANNELS.PHOTO);
+  if (!photoCh) {
+    photoCh = await guild.channels.create({
+      name: CHANNELS.PHOTO,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: buildOverwrites(guild, [oniRole.id, runnerRole.id]),
+    });
+  }
+
+  // 鬼陣営チャンネル
+  let oniText = findGameChannel(guild, CHANNELS.ONI_TEXT);
+  let oniVC = findGameChannel(guild, CHANNELS.ONI_VC);
+  if (!oniText) {
+    oniText = await guild.channels.create({
+      name: CHANNELS.ONI_TEXT,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: buildOverwrites(guild, [oniRole.id]),
+    });
+  }
+  if (!oniVC) {
+    oniVC = await guild.channels.create({
+      name: CHANNELS.ONI_VC,
+      type: ChannelType.GuildVoice,
+      parent: category.id,
+      permissionOverwrites: buildOverwrites(guild, [oniRole.id]),
+    });
+  }
+
+  // 逃走者陣営チャンネル
+  let runText = findGameChannel(guild, CHANNELS.RUN_TEXT);
+  let runVC = findGameChannel(guild, CHANNELS.RUN_VC);
+  if (!runText) {
+    runText = await guild.channels.create({
+      name: CHANNELS.RUN_TEXT,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: buildOverwrites(guild, [runnerRole.id]),
+    });
+  }
+  if (!runVC) {
+    runVC = await guild.channels.create({
+      name: CHANNELS.RUN_VC,
+      type: ChannelType.GuildVoice,
+      parent: category.id,
+      permissionOverwrites: buildOverwrites(guild, [runnerRole.id]),
+    });
+  }
+
+  state.game.createdChannelIds = [photoCh.id, oniText.id, oniVC.id, runText.id, runVC.id];
+
+  await announceTeams(controlCh);
+  await oniText.send(`<@&${oniRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
+  await runText.send(`<@&${runnerRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
+
+  return { success: true };
+}
+
+// チーム編成をメンション付きで全体連絡へ投稿
+async function announceTeams(channel) {
+  const lines = ['📋 **チーム編成が決まりました！**\n'];
+  const formatGuests = (team) =>
+    team.displayMembers.filter((m) => m.startsWith('(ゲスト)')).join(', ');
+
+  state.game.teams.oni.forEach((team, i) => {
+    const mentions = team.discordIds.map((id) => `<@${id}>`).join(' ');
+    const guests = formatGuests(team);
+    lines.push(`👹 **鬼 ${i + 1}班**: ${mentions}${guests ? ` / ゲスト: ${guests}` : ''}`);
+  });
+
+  state.game.teams.runner.forEach((team, i) => {
+    const mentions = team.discordIds.map((id) => `<@${id}>`).join(' ');
+    const guests = formatGuests(team);
+    lines.push(`🏃 **逃走者 ${i + 1}班**: ${mentions}${guests ? ` / ゲスト: ${guests}` : ''}`);
+  });
+
+  await channel.send(lines.join('\n'));
+}
+
+module.exports = { performTeamShuffle, setupTeamsAndChannels, announceTeams, getControlChannel };
+
+
+
+################################################
+FILE: src/handlers/buttons.js
+################################################
+
+// ==========================================
+// ボタン処理
+// ==========================================
+const {
+  PermissionsBitField,
+  ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+} = require('discord.js');
+const { state, getInitialGameStatus } = require('../state');
+const { ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
+const { generateRecruitEmbed } = require('../ui/embeds');
+const {
+  generateRecruitButtons,
+  generateHostMenuButtons,
+  sendControlPanel,
+  buildPlayingPanel,
+} = require('../ui/components');
+const { setupTeamsAndChannels, performTeamShuffle, announceTeams } = require('../game/teams');
+const {
+  getControlChannel,
+  getOrCreateRole,
+  stripAllRoles,
+  cleanupChannels,
+} = require('../utils/discord');
+const { startMissionTimer, startPhotoRemindTimer } = require('../game/missions');
+const { endGame, clearAllTimers } = require('../game/lifecycle');
+
+const isHost = (interaction) => interaction.user.id === state.game.hostId;
+const hostOnly = (interaction) =>
+  interaction.reply({ content: 'ホスト専用です。', ephemeral: true });
+
+async function handleButton(interaction) {
+  const { customId } = interaction;
+  const game = state.game;
+
+  // ▼ 参加/取消
+  if (customId === 'btn_join_leave') {
+    if (game.phase !== 'recruiting') {
+      return interaction.reply({ content: '現在は募集フェーズではありません。', ephemeral: true });
+    }
+    if (game.participants.has(interaction.user.id)) {
+      game.participants.delete(interaction.user.id);
+    } else {
+      game.participants.set(interaction.user.id, {
+        discordId: interaction.user.id,
+        guests: [],
+        pairedWith: new Set(),
+      });
+    }
+    return interaction.update({
+      embeds: [generateRecruitEmbed()],
+      components: generateRecruitButtons(),
+    });
+  }
+
+  // ▼ ゲスト追加
+  if (customId === 'btn_add_guest') {
+    if (!game.participants.has(interaction.user.id)) {
+      return interaction.reply({ content: '先に「参加」してください！', ephemeral: true });
+    }
+    const modal = new ModalBuilder().setCustomId('modal_guest').setTitle('ゲストの追加');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('guest_name')
+          .setLabel('追加するゲスト名（カンマ区切り）')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ▼ ペアを組む
+  if (customId === 'btn_pair') {
+    if (!game.participants.has(interaction.user.id)) {
+      return interaction.reply({ content: '先に「参加」してください！', ephemeral: true });
+    }
+    const others = [...game.participants.keys()].filter((id) => id !== interaction.user.id);
+    if (others.length === 0) {
+      return interaction.reply({ content: 'ペアを組む相手がまだ参加していません。', ephemeral: true });
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('select_pair')
+      .setPlaceholder('絶対に同じチームになりたい相手を選択');
+
+    for (const dId of others) {
+      let member = interaction.guild.members.cache.get(dId);
+      if (!member) member = await interaction.guild.members.fetch(dId).catch(() => null);
+      selectMenu.addOptions({
+        label: member ? member.displayName : `ユーザー(${dId})`,
+        value: dId,
+      });
+    }
+    return interaction.reply({
+      content: 'ペア相手を選んでください。\n※選んだ相手とは必ず同じチームになります。',
+      components: [new ActionRowBuilder().addComponents(selectMenu)],
+      ephemeral: true,
+    });
+  }
+
+  // ▼ ホスト専用メニューの展開
+  if (customId === 'btn_host_menu') {
+    if (!isHost(interaction)) {
+      return interaction.reply({
+        content: 'このメニューはホスト（募集開始者）専用です！',
+        ephemeral: true,
+      });
+    }
+    return interaction.reply({
+      content: '👑 **ホスト専用設定メニュー**\nここでゲームの設定や募集の締め切りを行えます。',
+      components: generateHostMenuButtons(),
+      ephemeral: true,
+    });
+  }
+
+  // ▼ 基本設定モーダル
+  if (customId === 'btn_setup_basic') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    const modal = new ModalBuilder().setCustomId('modal_setup_basic').setTitle('基本設定（時間・人数）');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_time')
+          .setLabel('制限時間（分）')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.settings.timeLimit))
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_oni')
+          .setLabel('鬼チームの数')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.settings.oniTeamCount))
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_teamsize')
+          .setLabel('1チームの人数目安')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.settings.teamSize))
+          .setRequired(true)
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ▼ 通知/ミッション設定モーダル
+  if (customId === 'btn_setup_mission') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    const modal = new ModalBuilder().setCustomId('modal_setup_mission').setTitle('通知・ミッション設定');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_photo')
+          .setLabel('写真通知の間隔（分）')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.photoRemind.interval))
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_min')
+          .setLabel('ミッション発令 最小間隔（分）')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.mission.intervalMin))
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_max')
+          .setLabel('ミッション発令 最大間隔（分）')
+          .setStyle(TextInputStyle.Short)
+          .setValue(String(game.mission.intervalMax))
+          .setRequired(true)
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ▼ ミッション ON/OFF 切替
+  if (customId === 'btn_toggle_mission') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    game.mission.enabled = !game.mission.enabled;
+    await interaction.update({ components: generateHostMenuButtons() });
+    // ゲーム中に ON にした場合はタイマーチェーンを起動（多重起動は内部で防止）
+    if (game.mission.enabled && game.phase === 'playing') {
+      startMissionTimer(interaction.guild);
+    }
+    if (game.recruitmentMessageId) {
+      const msg = await interaction.channel.messages
+        .fetch(game.recruitmentMessageId)
+        .catch(() => null);
+      if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+    }
+    return;
+  }
+
+  // ▼ 募集終了＆チーム分け
+  if (customId === 'btn_close_recruit') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    if (game.participants.size < 2) {
+      return interaction.reply({ content: '参加者が少なすぎます（最低2人必要）。', ephemeral: true });
+    }
+
+    await interaction.update({ content: 'チーム分け・チャンネル設定中...', components: [] });
+    const result = await setupTeamsAndChannels(interaction.guild);
+    if (!result.success) {
+      return interaction.editReply({ content: `⚠️ エラー: ${result.message}` });
+    }
+
+    await interaction.editReply({ content: '✅ 準備完了！各チャンネルで作戦会議をしてください。' });
+    const controlCh = getControlChannel(interaction.guild);
+    if (controlCh) await sendControlPanel(controlCh);
+    return;
+  }
+
+  // ▼ チーム再抽選
+  if (customId === 'btn_reshuffle') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    if (game.phase !== 'ready') {
+      return interaction.reply({ content: '準備完了フェーズでのみ可能です。', ephemeral: true });
+    }
+    await interaction.deferReply();
+    await stripAllRoles(interaction.guild);
+    const result = await performTeamShuffle(interaction.guild);
+    if (!result.success) return interaction.editReply(`⚠️ エラー: ${result.message}`);
+
+    const controlCh = getControlChannel(interaction.guild);
+    if (controlCh) await announceTeams(controlCh);
+
+    return interaction.editReply(
+      '🔀 **チームを再抽選しました！** 各陣営チャンネルのメンションを確認してください。'
+    );
+  }
+
+  // ▼ ゲーム開始
+  if (customId === 'start_game_button') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    if (game.phase !== 'ready') {
+      return interaction.reply({ content: '準備完了していません。', ephemeral: true });
+    }
+
+    game.phase = 'playing';
+    await interaction.reply(
+      `▶️ **ゲームスタート！** 制限時間は **${game.settings.timeLimit}分** です！`
+    );
+
+    const panelMsg = await interaction.channel.messages
+      .fetch(game.controlPanelMessageId)
+      .catch(() => null);
+    if (panelMsg) await panelMsg.edit(buildPlayingPanel());
+
+    // 多重起動防止のため既存タイマーを破棄してから張り直す
+    clearAllTimers();
+    game.gameTimer = setTimeout(() => {
+      endGame(interaction.guild, interaction.channel, '⏰ 時間切れ！ゲーム終了です！');
+    }, game.settings.timeLimit * 60 * 1000);
+
+    startMissionTimer(interaction.guild);
+    startPhotoRemindTimer(interaction.guild);
+    return;
+  }
+
+  // ▼ 捕獲報告
+  if (customId === 'btn_catch') {
+    if (game.phase !== 'playing') {
+      return interaction.reply({ content: 'ゲーム中のみ有効です。', ephemeral: true });
+    }
+    const isOni = game.teams.oni.some((t) => t.discordIds.includes(interaction.user.id));
+    if (!isOni && !isHost(interaction)) {
+      return interaction.reply({ content: '鬼陣営のみ報告できます。', ephemeral: true });
+    }
+    if (game.teams.runner.length === 0) {
+      return interaction.reply({ content: '逃走者がいません。', ephemeral: true });
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('catch_select_menu')
+      .setPlaceholder('捕獲したチームを選択');
+    game.teams.runner.forEach((team, index) => {
+      selectMenu.addOptions({
+        label: `逃走者 ${index + 1}班`,
+        description: `メンバー: ${team.displayMembers.join(', ').substring(0, 50)}`,
+        value: team.id,
+      });
+    });
+    return interaction.reply({
+      content: 'どのチームを捕まえましたか？',
+      components: [new ActionRowBuilder().addComponents(selectMenu)],
+      ephemeral: true,
+    });
+  }
+
+  // ▼ ポイント操作
+  if (customId === 'btn_give_point') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('select_point_team')
+      .setPlaceholder('ポイントを与えるチームを選択');
+    game.teams.oni.forEach((t, i) =>
+      selectMenu.addOptions({
+        label: `👹鬼 ${i + 1}班`,
+        description: `メンバー: ${t.displayMembers.join(', ').substring(0, 50)}`,
+        value: t.id,
+      })
+    );
+    game.teams.runner.forEach((t, i) =>
+      selectMenu.addOptions({
+        label: `🏃逃走者 ${i + 1}班`,
+        description: `メンバー: ${t.displayMembers.join(', ').substring(0, 50)}`,
+        value: t.id,
+      })
+    );
+    return interaction.reply({
+      content: 'どのチームにポイントを与えますか？',
+      components: [new ActionRowBuilder().addComponents(selectMenu)],
+      ephemeral: true,
+    });
+  }
+
+  // ▼ ミッション手動追加
+  if (customId === 'btn_add_mission') {
+    if (!isHost(interaction)) return hostOnly(interaction);
+    const modal = new ModalBuilder().setCustomId('modal_add_mission').setTitle('ミッション手動追加');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('mission_content')
+          .setLabel('ミッション内容')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ▼ コンティニュー・終了操作
+  if (['btn_cont_same', 'btn_cont_shuffle', 'btn_end_keep', 'btn_end_cleanup'].includes(customId)) {
+    const isAdmin = interaction.member?.permissions?.has(PermissionsBitField.Flags.Administrator);
+    if (!isHost(interaction) && !isAdmin) {
+      return interaction.reply({ content: 'ホストまたは管理者専用です。', ephemeral: true });
+    }
+    return handleContinue(interaction, customId);
+  }
+}
+
+// コンティニュー・終了の各分岐
+async function handleContinue(interaction, customId) {
+  const game = state.game;
+
+  if (customId === 'btn_cont_same') {
+    await interaction.deferReply();
+    game.teams = {
+      oni: game.initialTeams.oni.map((t) => ({ ...t })),
+      runner: game.initialTeams.runner.map((t) => ({ ...t })),
+    };
+    await stripAllRoles(interaction.guild);
+
+    const oniRole = await getOrCreateRole(interaction.guild, ONI_ROLE_NAME, 'Red');
+    const runnerRole = await getOrCreateRole(interaction.guild, RUNNER_ROLE_NAME, 'Blue');
+    for (const t of game.teams.oni) {
+      for (const id of t.discordIds) {
+        const m = await interaction.guild.members.fetch(id).catch(() => null);
+        if (m) await m.roles.add(oniRole).catch(() => {});
+      }
+    }
+    for (const t of game.teams.runner) {
+      for (const id of t.discordIds) {
+        const m = await interaction.guild.members.fetch(id).catch(() => null);
+        if (m) await m.roles.add(runnerRole).catch(() => {});
+      }
+    }
+
+    game.phase = 'ready';
+    await interaction.editReply(
+      '🔄 **同じチームでコンティニューします！** 各陣営のチャンネルで作戦会議をしてください。'
+    );
+    const controlCh = getControlChannel(interaction.guild);
+    if (controlCh) {
+      await announceTeams(controlCh);
+      await sendControlPanel(controlCh);
+    }
+    return;
+  }
+
+  if (customId === 'btn_cont_shuffle') {
+    await interaction.deferReply();
+    await stripAllRoles(interaction.guild);
+    const oldPoints = game.points;
+    state.game = getInitialGameStatus(true, game);
+    state.game.points = oldPoints; // ポイントを引き継ぐ場合はこの行を残す
+    state.game.phase = 'recruiting';
+    state.game.hostId = interaction.user.id;
+    state.game.participants.set(interaction.user.id, {
+      discordId: interaction.user.id,
+      guests: [],
+      pairedWith: new Set(),
+    });
+    const msg = await interaction.channel.send({
+      embeds: [generateRecruitEmbed()],
+      components: generateRecruitButtons(),
+    });
+    state.game.recruitmentMessageId = msg.id;
+    state.game.gameChannelId = interaction.channelId;
+    return interaction.editReply('🔀 **チームとポイントをリセットしました！再度募集を行います。**');
+  }
+
+  if (customId === 'btn_end_keep') {
+    await interaction.deferReply();
+    await stripAllRoles(interaction.guild);
+    state.game = getInitialGameStatus(true, game);
+    return interaction.editReply(
+      '♻️ **ゲームを終了しました。チャンネルは次回のために残しておきます。**'
+    );
+  }
+
+  if (customId === 'btn_end_cleanup') {
+    await interaction.deferReply();
+    await stripAllRoles(interaction.guild);
+    await cleanupChannels(interaction.guild);
+    state.game = getInitialGameStatus(false);
+    return interaction.editReply('🗑️ **クリーンアップ完了！お疲れ様でした。**');
+  }
+}
+
+module.exports = { handleButton };
+
+
+
+################################################
+FILE: src/handlers/commands.js
+################################################
+
+// ==========================================
+// スラッシュコマンド処理
+// ==========================================
+const { PermissionsBitField } = require('discord.js');
+const { state, getInitialGameStatus } = require('../state');
+const { generateRecruitEmbed, buildWelcomeEmbed } = require('../ui/embeds');
+const { generateRecruitButtons } = require('../ui/components');
+const { endGame } = require('../game/lifecycle');
+
+async function handleSlashCommand(interaction) {
+  const { commandName } = interaction;
+
+  if (commandName === 'welcome') {
+    return interaction.reply({ embeds: [buildWelcomeEmbed()] });
+  }
+
+  if (commandName === 'game-recruit') {
+    if (state.game.phase !== 'idle') {
+      return interaction.reply({ content: '他のゲームが進行中または募集中です。', ephemeral: true });
+    }
+
+    state.game = getInitialGameStatus(true, state.game);
+    state.game.phase = 'recruiting';
+    state.game.hostId = interaction.user.id;
+    state.game.participants.set(interaction.user.id, {
+      discordId: interaction.user.id,
+      guests: [],
+      pairedWith: new Set(),
+    });
+
+    await interaction.reply({
+      embeds: [generateRecruitEmbed()],
+      components: generateRecruitButtons(),
+    });
+    const sent = await interaction.fetchReply();
+    state.game.recruitmentMessageId = sent.id;
+    state.game.gameChannelId = interaction.channelId;
+    return;
+  }
+
+  if (commandName === 'game-end') {
+    if (state.game.phase === 'idle') {
+      return interaction.reply({ content: '現在ゲームは行われていません。', ephemeral: true });
+    }
+    const isAdmin = interaction.member?.permissions?.has(PermissionsBitField.Flags.Administrator);
+    if (interaction.user.id !== state.game.hostId && !isAdmin) {
+      return interaction.reply({ content: '権限がありません。', ephemeral: true });
+    }
+    await interaction.reply('ゲームを強制終了します…');
+    await endGame(interaction.guild, interaction.channel, '管理者により強制終了されました。');
+    return;
+  }
+
+  if (commandName === 'ping') {
+    return interaction.reply('Pong!');
+  }
+}
+
+module.exports = { handleSlashCommand };
+
+
+
+################################################
+FILE: src/handlers/modals.js
+################################################
+
+// ==========================================
+// モーダル送信処理
+// ==========================================
+const { state } = require('../state');
+const { generateRecruitEmbed } = require('../ui/embeds');
+const { getControlChannel } = require('../utils/discord');
+
+// 募集パネルメッセージを最新状態へ更新
+async function refreshRecruitPanel(interaction) {
+  if (!state.game.recruitmentMessageId) return;
+  const msg = await interaction.channel.messages
+    .fetch(state.game.recruitmentMessageId)
+    .catch(() => null);
+  if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+}
+
+async function handleModal(interaction) {
+  const game = state.game;
+
+  // ▼ ゲスト追加
+  if (interaction.customId === 'modal_guest') {
+    const guestNames = interaction.fields
+      .getTextInputValue('guest_name')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s);
+    const data = game.participants.get(interaction.user.id);
+    if (!data) {
+      return interaction.reply({
+        content: '参加情報が見つかりません。再度参加ボタンを押してください。',
+        ephemeral: true,
+      });
+    }
+    data.guests.push(...guestNames);
+    await refreshRecruitPanel(interaction);
+    return interaction.reply({
+      content: `✅ ゲスト「${guestNames.join(', ')}」を追加しました！`,
+      ephemeral: true,
+    });
+  }
+
+  // ▼ 基本設定
+  if (interaction.customId === 'modal_setup_basic') {
+    const time = parseInt(interaction.fields.getTextInputValue('input_time'));
+    const oniCount = parseInt(interaction.fields.getTextInputValue('input_oni'));
+    const teamSize = parseInt(interaction.fields.getTextInputValue('input_teamsize'));
+    if (isNaN(time) || isNaN(oniCount) || isNaN(teamSize) || oniCount < 1 || teamSize < 1) {
+      return interaction.reply({ content: '正しい数値を入力してください。', ephemeral: true });
+    }
+    game.settings.timeLimit = time;
+    game.settings.oniTeamCount = oniCount;
+    game.settings.teamSize = teamSize;
+    await refreshRecruitPanel(interaction);
+    return interaction.reply({
+      content: '✅ 基本設定を保存し、募集パネルを更新しました。',
+      ephemeral: true,
+    });
+  }
+
+  // ▼ 通知/間隔設定
+  if (interaction.customId === 'modal_setup_mission') {
+    const photo = parseInt(interaction.fields.getTextInputValue('input_photo'));
+    const min = parseInt(interaction.fields.getTextInputValue('input_min'));
+    const max = parseInt(interaction.fields.getTextInputValue('input_max'));
+    if (isNaN(photo) || isNaN(min) || isNaN(max) || min > max || photo < 1) {
+      return interaction.reply({
+        content: '正しい数値を入力してください（最小間隔は最大間隔以下にしてください）。',
+        ephemeral: true,
+      });
+    }
+    game.photoRemind.interval = photo;
+    game.mission.intervalMin = min;
+    game.mission.intervalMax = max;
+    await refreshRecruitPanel(interaction);
+    return interaction.reply({
+      content: '✅ 通知/間隔設定を保存し、募集パネルを更新しました。',
+      ephemeral: true,
+    });
+  }
+
+  // ▼ ミッション手動追加
+  if (interaction.customId === 'modal_add_mission') {
+    const content = interaction.fields.getTextInputValue('mission_content');
+    game.mission.customMissions.push(content);
+    return interaction.reply({
+      content: `✅ 手動ミッションをストックしました！\n内容: ${content}`,
+      ephemeral: true,
+    });
+  }
+
+  // ▼ ポイント付与
+  if (interaction.customId.startsWith('modal_point_')) {
+    const teamId = interaction.customId.replace('modal_point_', '');
+    const points = parseInt(interaction.fields.getTextInputValue('input_point'));
+    if (isNaN(points)) {
+      return interaction.reply({ content: '数値を入力してください。', ephemeral: true });
+    }
+
+    game.points[teamId] = (game.points[teamId] || 0) + points;
+
+    let teamName = '不明なチーム';
+    const oniIdx = game.teams.oni.findIndex((t) => t.id === teamId);
+    if (oniIdx !== -1) {
+      teamName = `👹鬼 ${oniIdx + 1}班`;
+    } else {
+      const runIdx = game.teams.runner.findIndex((t) => t.id === teamId);
+      if (runIdx !== -1) teamName = `🏃逃走者 ${runIdx + 1}班`;
+    }
+
+    const controlCh = getControlChannel(interaction.guild);
+    if (controlCh) {
+      await controlCh.send(
+        `🪙 **ポイント付与！**\n**${teamName}** に **${points}pt** が付与されました！ (合計: ${game.points[teamId]}pt)`
+      );
+    }
+    return interaction.reply({
+      content: `✅ ${teamName} に ${points}pt を付与しました。`,
+      ephemeral: true,
+    });
+  }
+}
+
+module.exports = { handleModal };
+
+
+
+################################################
+FILE: src/handlers/selects.js
+################################################
+
+// ==========================================
+// 選択メニュー処理
+// ==========================================
+const {
+  ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} = require('discord.js');
+const { state } = require('../state');
+const { ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
+const { generateRecruitEmbed } = require('../ui/embeds');
+const { getControlChannel } = require('../utils/discord');
+const { endGame } = require('../game/lifecycle');
+
+async function handleSelectMenu(interaction) {
+  const game = state.game;
+
+  // ▼ ペア相手の選択
+  if (interaction.customId === 'select_pair') {
+    const targetId = interaction.values[0];
+    const myData = game.participants.get(interaction.user.id);
+    const targetData = game.participants.get(targetId);
+
+    if (!myData || !targetData) {
+      return interaction.update({ content: '⚠️ 参加者情報が見つかりません。', components: [] });
+    }
+
+    myData.pairedWith.add(targetId);
+    targetData.pairedWith.add(interaction.user.id);
+
+    let member = interaction.guild.members.cache.get(targetId);
+    if (!member) member = await interaction.guild.members.fetch(targetId).catch(() => null);
+
+    await interaction.update({
+      content: `✅ **${
+        member ? member.displayName : '相手'
+      }** さんとペアを組みました！必ず同じチームになります。`,
+      components: [],
+    });
+
+    if (game.recruitmentMessageId) {
+      const msg = await interaction.channel.messages
+        .fetch(game.recruitmentMessageId)
+        .catch(() => null);
+      if (msg) await msg.edit({ embeds: [generateRecruitEmbed()] });
+    }
+    return;
+  }
+
+  // ▼ ポイント付与対象チームの選択 → モーダル
+  if (interaction.customId === 'select_point_team') {
+    const teamId = interaction.values[0];
+    const modal = new ModalBuilder().setCustomId(`modal_point_${teamId}`).setTitle('ポイント付与');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('input_point')
+          .setLabel('付与するポイント (例: 100, -50)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+    return interaction.showModal(modal);
+  }
+
+  // ▼ 捕獲したチームの選択
+  if (interaction.customId === 'catch_select_menu') {
+    const teamId = interaction.values[0];
+    const teamIndex = game.teams.runner.findIndex((t) => t.id === teamId);
+    if (teamIndex === -1) {
+      return interaction.update({ content: 'そのチームは既に捕獲されています。', components: [] });
+    }
+
+    // 捕獲した鬼チームにポイント付与
+    const trackerTeam = game.teams.oni.find((t) => t.discordIds.includes(interaction.user.id));
+    if (trackerTeam) {
+      game.points[trackerTeam.id] = (game.points[trackerTeam.id] || 0) + 100;
+    }
+
+    const caughtTeam = game.teams.runner.splice(teamIndex, 1)[0];
+    game.teams.oni.push(caughtTeam);
+
+    const oniRole = interaction.guild.roles.cache.find((r) => r.name === ONI_ROLE_NAME);
+    const runnerRole = interaction.guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+
+    for (const dId of caughtTeam.discordIds) {
+      const member = await interaction.guild.members.fetch(dId).catch(() => null);
+      if (member) {
+        if (runnerRole) await member.roles.remove(runnerRole).catch(() => {});
+        if (oniRole) await member.roles.add(oniRole).catch(() => {});
+      }
+    }
+
+    await interaction.update({
+      content: `✅ **逃走者チーム** (${caughtTeam.displayMembers.join(
+        ', '
+      )}) を捕獲し、鬼チームに 100pt 加算しました！`,
+      components: [],
+    });
+
+    const controlCh = getControlChannel(interaction.guild);
+    if (controlCh) {
+      await controlCh.send(
+        `🚨 **捕獲情報** 🚨\n<@${interaction.user.id}> が逃走者を捕まえました！(+100pt)\n捕まったメンバー: **${caughtTeam.displayMembers.join(
+          ', '
+        )}** は鬼陣営になります！`
+      );
+    }
+
+    if (game.teams.runner.length === 0) {
+      await endGame(interaction.guild, controlCh, '🎊 全員の逃走者が捕まりました！鬼陣営の勝利です！');
+    }
+    return;
+  }
+}
+
+module.exports = { handleSelectMenu };
+
+
+
+################################################
+FILE: src/state.js
+################################################
+
+// ==========================================
+// ゲーム状態管理
+//
+// 注意: gameStatus は複数箇所で「丸ごと差し替え」される。
+// import binding の再代入は他モジュールへ伝播しないため、
+// 状態は state コンテナ経由（state.game）で共有し、
+// リセット時は state.game = getInitialGameStatus(...) で差し替える。
+// ==========================================
+
+function getInitialGameStatus(keepChannels = false, oldStatus = null) {
+  return {
+    phase: 'idle',
+    hostId: oldStatus ? oldStatus.hostId : null,
+    recruitmentMessageId: null,
+    // participants: Map<discordId, { discordId, guests:string[], pairedWith: Set<discordId> }>
+    participants: new Map(),
+    teams: { oni: [], runner: [] },
+    initialTeams: { oni: [], runner: [] },
+    points: oldStatus && oldStatus.points ? oldStatus.points : {},
+    controlPanelMessageId: null,
+    settings: oldStatus ? oldStatus.settings : { timeLimit: 60, oniTeamCount: 1, teamSize: 2 },
+    gameTimer: null,
+    createdChannelIds: keepChannels && oldStatus ? oldStatus.createdChannelIds : [],
+    categoryChannelId: keepChannels && oldStatus ? oldStatus.categoryChannelId : null,
+    gameChannelId: null,
+    mission: oldStatus
+      ? oldStatus.mission
+      : {
+          enabled: true,
+          timer: null,
+          intervalMin: 5,
+          intervalMax: 15,
+          customMissions: [],
+          defaultMissions: [
+            '指定された色のものを3つ集めて写真を撮れ！',
+            '一番高い場所に移動して景色を報告せよ！',
+            'チーム全員でジャンプしている写真を撮れ！',
+            '自動販売機で一番安い飲み物を見つけて写真を撮れ！',
+            '動物（犬・猫・鳥など）の写真を撮影せよ！',
+            '街にある「数字の7」を探して写真を撮れ！',
+          ],
+        },
+    photoRemind: oldStatus ? oldStatus.photoRemind : { timer: null, interval: 5 },
+  };
+}
+
+// 全モジュールが参照する状態コンテナ
+const state = { game: getInitialGameStatus() };
+
+module.exports = { state, getInitialGameStatus };
+
+
+
+################################################
+FILE: src/ui/components.js
+################################################
+
+// ==========================================
+// ボタン/コンポーネント生成
+// ==========================================
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { state } = require('../state');
+const { COLORS } = require('../config');
+
+// 募集パネルのボタン
+function generateRecruitButtons() {
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_join_leave').setLabel('👍 参加/取消').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('btn_add_guest').setLabel('👤 ゲスト追加').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_pair').setLabel('🤝 ペアを組む').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_host_menu').setLabel('👑 ホストメニュー').setStyle(ButtonStyle.Danger)
+  );
+  return [row1];
+}
+
+// ホスト専用メニューのボタン
+function generateHostMenuButtons() {
+  const enabled = state.game.mission.enabled;
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_setup_basic').setLabel('⚙️ 時間/人数設定').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_setup_mission').setLabel('⚙️ 通知/間隔設定').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('btn_toggle_mission')
+      .setLabel(`🔄 ミッション: ${enabled ? 'ON' : 'OFF'}`)
+      .setStyle(enabled ? ButtonStyle.Success : ButtonStyle.Danger)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_close_recruit').setLabel('✅ 募集終了＆チーム分け').setStyle(ButtonStyle.Success)
+  );
+  return [row1, row2];
+}
+
+// 準備中コントロールパネルを送信し、メッセージIDを保存
+async function sendControlPanel(channel) {
+  const embed = new EmbedBuilder()
+    .setColor(COLORS.PANEL)
+    .setTitle('🎮 ゲームコントロールパネル (準備中)')
+    .setDescription('チームが気に入らない場合は再抽選できます。\n準備ができたら開始を押してください。');
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('start_game_button').setLabel('▶️ ゲーム開始').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('btn_reshuffle').setLabel('🔀 チーム再抽選').setStyle(ButtonStyle.Secondary)
+  );
+  const sentMessage = await channel.send({ embeds: [embed], components: [row1] });
+  state.game.controlPanelMessageId = sentMessage.id;
+}
+
+// ゲーム進行中パネル（embed + ボタン行）
+function buildPlayingPanel() {
+  const embed = new EmbedBuilder()
+    .setColor(COLORS.PLAYING)
+    .setTitle('🎮 ゲーム進行中パネル')
+    .setDescription('捕獲報告やポイント操作、ミッション追加ができます。');
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_catch').setLabel('🤚 捕獲報告').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('btn_give_point').setLabel('🪙 ポイント操作(ホスト用)').setStyle(ButtonStyle.Success)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_add_mission').setLabel('📝 ミッション追加(ホスト用)').setStyle(ButtonStyle.Secondary)
+  );
+  return { embeds: [embed], components: [row1, row2] };
+}
+
+module.exports = {
+  generateRecruitButtons,
+  generateHostMenuButtons,
+  sendControlPanel,
+  buildPlayingPanel,
+};
+
+
+
+################################################
+FILE: src/ui/embeds.js
+################################################
+
+// ==========================================
+// Embed 生成
+// ==========================================
+const { EmbedBuilder } = require('discord.js');
+const { state } = require('../state');
+const { COLORS } = require('../config');
+
+// 募集パネルの Embed
+function generateRecruitEmbed() {
+  const game = state.game;
+  let pList = '';
+  let totalCount = 0;
+  if (game.participants.size === 0) {
+    pList = 'まだいません';
+  } else {
+    game.participants.forEach((d) => {
+      pList += `・<@${d.discordId}>`;
+      if (d.guests.length > 0) pList += ` (ゲスト: ${d.guests.join(', ')})`;
+      if (d.pairedWith.size > 0) pList += ' 🤝ペア固定';
+      pList += '\n';
+      totalCount += 1 + d.guests.length;
+    });
+  }
+
+  let settingText = `⏰ 制限時間: **${game.settings.timeLimit}分**\n`;
+  settingText += `👹 鬼チーム数: **${game.settings.oniTeamCount}班**\n`;
+  settingText += `👥 1チーム人数: **約${game.settings.teamSize}人**\n`;
+  settingText += `📸 写真通知: **${game.photoRemind.interval}分ごと**\n`;
+  settingText += `🚨 ミッション: **${
+    game.mission.enabled ? `ON (${game.mission.intervalMin}〜${game.mission.intervalMax}分)` : 'OFF'
+  }**`;
+
+  return new EmbedBuilder()
+    .setColor(COLORS.RECRUIT)
+    .setTitle('🏃 リアル隠れ鬼ごっこ 参加者募集 👹')
+    .setDescription('下のボタンから参加、ゲスト追加、ペア設定を行ってください！')
+    .addFields(
+      { name: `現在の参加者（計 ${totalCount} 人）`, value: pList },
+      { name: '⚙️ 現在のゲーム設定', value: settingText }
+    );
+}
+
+// /welcome の説明 Embed
+function buildWelcomeEmbed() {
+  return new EmbedBuilder()
+    .setColor(COLORS.WELCOME)
+    .setTitle('👹 リアル隠れ鬼ごっこ Bot 取扱説明書')
+    .setDescription('このBotは、現実世界での鬼ごっこをDiscordで楽しく管理するためのツールです。')
+    .addFields(
+      {
+        name: 'Step 1: 募集を開始する',
+        value: 'ホストが `/game-recruit` を実行します。表示されたパネルで参加者を集めます。',
+      },
+      {
+        name: 'Step 2: 参加・設定',
+        value:
+          '参加者は「👍参加」を押し、必要なら「👤ゲスト」「🤝ペア」を設定します。\nホストは「👑ホストメニュー」から制限時間や人数を設定し、「✅募集終了」を押します。',
+      },
+      {
+        name: 'Step 3: 準備と開始',
+        value:
+          '自動作成された専用チャンネルで班ごとに作戦会議をします。\n準備ができたら、ホストが全体連絡チャンネルのパネルから「▶️ゲーム開始」を押します。',
+      },
+      {
+        name: 'Step 4: ゲーム中',
+        value:
+          '鬼は逃走者を捕まえたら「🤚捕獲報告」をします（チームごと鬼に移動します）。\n定期的にミッションが届くので、クリアしてポイントを稼ぎましょう！',
+      },
+      {
+        name: 'Step 5: ゲーム終了',
+        value:
+          '時間切れ、または逃走者全滅で終了し、ランキングが発表されます。\n最後にコンティニュー（再戦）か終了を選んで完了です。',
+      }
+    )
+    .setFooter({ text: '困ったときはサーバー管理者に相談してください。' });
+}
+
+module.exports = { generateRecruitEmbed, buildWelcomeEmbed };
+
+
+
+################################################
+FILE: src/utils/discord.js
+################################################
+
+// ==========================================
+// Discord 共通ユーティリティ
+// ==========================================
+const { state } = require('../state');
+const { CHANNELS, ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
+
+// カテゴリ内のチャンネルを名前で検索
+function findGameChannel(guild, name) {
+  return guild.channels.cache.find(
+    (c) => c.name === name && c.parentId === state.game.categoryChannelId
+  );
+}
+
+// 全体連絡チャンネルを取得（旧コードで6箇所以上に重複していた処理を集約）
+function getControlChannel(guild) {
+  return findGameChannel(guild, CHANNELS.CONTROL);
+}
+
+// 役職を取得、無ければ作成
+async function getOrCreateRole(guild, roleName, color) {
+  let role = guild.roles.cache.find((r) => r.name === roleName);
+  if (!role) role = await guild.roles.create({ name: roleName, color, reason: '鬼ごっこ用' });
+  return role;
+}
+
+// 参加者全員から鬼/逃走者ロールを剥がす
+async function stripAllRoles(guild) {
+  const oniRole = guild.roles.cache.find((r) => r.name === ONI_ROLE_NAME);
+  const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+  for (const dId of state.game.participants.keys()) {
+    const m = await guild.members.fetch(dId).catch(() => null);
+    if (!m) continue;
+    if (oniRole) await m.roles.remove(oniRole).catch(() => {});
+    if (runnerRole) await m.roles.remove(runnerRole).catch(() => {});
+  }
+}
+
+// 作成したチャンネルとカテゴリを削除
+async function cleanupChannels(guild) {
+  for (const chId of state.game.createdChannelIds) {
+    const ch = guild.channels.cache.get(chId);
+    if (ch) await ch.delete().catch(() => {});
+  }
+  if (state.game.categoryChannelId) {
+    const cat = guild.channels.cache.get(state.game.categoryChannelId);
+    if (cat) await cat.delete().catch(() => {});
+  }
+  state.game.createdChannelIds = [];
+  state.game.categoryChannelId = null;
+}
+
+module.exports = {
+  findGameChannel,
+  getControlChannel,
+  getOrCreateRole,
+  stripAllRoles,
+  cleanupChannels,
+};
+
 

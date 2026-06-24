@@ -2,13 +2,28 @@
 const fs = require('fs');
 const path = require('path');
 
-// 結合するファイルのリスト（パスは環境に合わせて調整してください）
+// src/ 配下の .js を再帰的に収集
+function collectJsFiles(dir) {
+    const results = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            results.push(...collectJsFiles(full));
+        } else if (entry.name.endsWith('.js')) {
+            const rel = path.relative(__dirname, full);
+            results.push({ name: rel, path: './' + rel });
+        }
+    }
+    return results;
+}
+
+// 結合するファイルのリスト
 const filesToBundle = [
     { name: 'package.json', path: './package.json' },
     { name: 'Dockerfile', path: './Dockerfile' },
     { name: 'start.sh', path: './start.sh' },
-    { name: '.dockerignore', path: './.dockerignore' },
-    { name: 'app/index.js', path: './app/index.js' } // index.jsがappフォルダ内にある場合
+    { name: 'index.js', path: './index.js' },
+    ...collectJsFiles(path.resolve(__dirname, 'src')),
 ];
 
 const outputFileName = 'project-bundle-for-ai.txt';

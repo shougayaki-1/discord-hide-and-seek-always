@@ -1,0 +1,6 @@
+# シェルスクリプト・.commandはLF固定（Windowsでcloneしてもshebangが壊れないように）
+*.sh text eol=lf
+*.command text eol=lf
+
+# Windowsバッチファイルは慣例に合わせてCRLF固定
+*.bat text eol=crlf

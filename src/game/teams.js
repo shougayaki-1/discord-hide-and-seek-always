@@ -4,7 +4,7 @@
 // ==========================================
 const { PermissionsBitField, ChannelType } = require('discord.js');
 const { CHANNELS, ONI_ROLE_NAME, RUNNER_ROLE_NAME } = require('../config');
-const { getOrCreateRole, findGameChannel } = require('../utils/discord');
+const { getOrCreateRole, findGameChannel, findChannelByName } = require('../utils/discord');
 
 // ペア固定を考慮してチームを抽選し、ロールを付与する
 async function performTeamShuffle(guild, game) {
@@ -145,16 +145,35 @@ async function setupTeamsAndChannels(guild, game) {
     });
   }
 
-  // 写真共有（鬼・逃走者のみ）
-  let photoCh = findGameChannel(guild, game, CHANNELS.PHOTO);
-  if (!photoCh) {
-    photoCh = await guild.channels.create({
+  // 写真アルバム（フォーラム / 鬼・逃走者のみ閲覧可）
+  // カテゴリの外に独立して作成し、片付け（クリーンアップ）の対象外にすることで
+  // 試合ごとのスレッドが写真の記録として永続的に残るようにする
+  let photoForum = findChannelByName(guild, CHANNELS.PHOTO);
+  if (!photoForum) {
+    photoForum = await guild.channels.create({
       name: CHANNELS.PHOTO,
-      type: ChannelType.GuildText,
-      parent: category.id,
+      type: ChannelType.GuildForum,
       permissionOverwrites: buildOverwrites(guild, [oniRole.id, runnerRole.id]),
     });
+  } else {
+    await photoForum.permissionOverwrites
+      .set(buildOverwrites(guild, [oniRole.id, runnerRole.id]))
+      .catch(() => {});
   }
+
+  const matchLabel = new Date().toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const photoThread = await photoForum.threads.create({
+    name: `📸 ${matchLabel} の試合`,
+    message: { content: '今回の試合の写真・ミッション達成報告はこのスレッドに投稿してください！' },
+  });
+  game.photoThreadId = photoThread.id;
 
   // 鬼陣営チャンネル
   let oniText = findGameChannel(guild, game, CHANNELS.ONI_TEXT);
@@ -196,9 +215,12 @@ async function setupTeamsAndChannels(guild, game) {
     });
   }
 
-  game.createdChannelIds = [photoCh.id, oniText.id, oniVC.id, runText.id, runVC.id];
+  game.createdChannelIds = [oniText.id, oniVC.id, runText.id, runVC.id];
 
   await announceTeams(controlCh, game);
+  await controlCh.send(
+    `📸 今回の試合の写真アルバムスレッドはこちら → <#${photoThread.id}>`
+  );
   await oniText.send(`<@&${oniRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
   await runText.send(`<@&${runnerRole.id}> チーム分けが完了しました！作戦会議を始めてください。`);
 

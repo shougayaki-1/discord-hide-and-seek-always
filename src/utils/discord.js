@@ -11,6 +11,12 @@ function findGameChannel(guild, game, name) {
   );
 }
 
+// カテゴリに属さない（永続的な）チャンネルを名前で検索
+// 写真アルバム用フォーラムなど、片付け対象にしたくないチャンネルに使う
+function findChannelByName(guild, name) {
+  return guild.channels.cache.find((c) => c.name === name && c.parentId == null);
+}
+
 // 全体連絡チャンネルを取得
 function getControlChannel(guild, game) {
   return findGameChannel(guild, game, CHANNELS.CONTROL);
@@ -51,6 +57,7 @@ async function cleanupChannels(guild, game) {
 
 module.exports = {
   findGameChannel,
+  findChannelByName,
   getControlChannel,
   getOrCreateRole,
   stripAllRoles,

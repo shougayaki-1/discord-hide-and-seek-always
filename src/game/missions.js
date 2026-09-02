@@ -38,11 +38,14 @@ async function issueMission(guild, game) {
   const controlCh = getControlChannel(guild, game);
   if (!controlCh) return;
   const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
+  const albumHint = game.photoThreadId
+    ? `達成できたら <#${game.photoThreadId}> に投稿しよう！`
+    : '達成できたら写真アルバムスレッドに投稿しよう！';
   const embed = new EmbedBuilder()
     .setColor(COLORS.MISSION)
     .setTitle('🚨 緊急ミッション発令！ 🚨')
     .setDescription(missionContent)
-    .setFooter({ text: '達成できたら写真共有チャンネルに投稿しよう！' });
+    .setFooter({ text: albumHint });
   await controlCh.send({ content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者', embeds: [embed] });
 }
 
@@ -50,14 +53,15 @@ function startPhotoRemindTimer(guild, game) {
   if (game.photoRemind.timer) return;
   game.photoRemind.timer = setInterval(async () => {
     if (game.phase !== 'playing') return;
-    const controlCh = getControlChannel(guild, game);
-    if (!controlCh) return;
+    if (!game.photoThreadId) return;
+    const photoThread = await guild.channels.fetch(game.photoThreadId).catch(() => null);
+    if (!photoThread) return;
     const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
     const embed = new EmbedBuilder()
       .setColor(COLORS.PHOTO)
       .setTitle('📸 写真提出リマインド')
-      .setDescription('現在地のヒントとなる写真を「📸写真共有」チャンネルに投稿してください！');
-    await controlCh.send({
+      .setDescription('現在地のヒントとなる写真をこのスレッドに投稿してください！');
+    await photoThread.send({
       content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
       embeds: [embed],
     });

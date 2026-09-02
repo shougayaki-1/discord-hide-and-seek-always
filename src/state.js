@@ -22,6 +22,7 @@ function getInitialGameStatus(keepChannels = false, oldStatus = null) {
     createdChannelIds: keepChannels && oldStatus ? oldStatus.createdChannelIds : [],
     categoryChannelId: keepChannels && oldStatus ? oldStatus.categoryChannelId : null,
     gameChannelId: null,
+    photoThreadId: null,
     mission: oldStatus
       ? oldStatus.mission
       : {

@@ -40,7 +40,9 @@ function getInitialGameStatus(keepChannels = false, oldStatus = null) {
             '街にある「数字の7」を探して写真を撮れ！',
           ],
         },
-    photoRemind: oldStatus ? oldStatus.photoRemind : { timer: null, interval: 5 },
+    photoRemind: oldStatus
+      ? oldStatus.photoRemind
+      : { timer: null, interval: 5, unsubmittedTimers: [] },
   };
 }
 

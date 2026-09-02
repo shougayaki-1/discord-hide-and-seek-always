@@ -65,7 +65,48 @@ function startPhotoRemindTimer(guild, game) {
       content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
       embeds: [embed],
     });
+
+    // 1分後、まだ写真を出していないチームだけに個別リマインド
+    const t = setTimeout(async () => {
+      game.photoRemind.unsubmittedTimers = game.photoRemind.unsubmittedTimers.filter((x) => x !== t);
+      await remindUnsubmittedTeams(guild, game, photoThread);
+    }, 60 * 1000);
+    game.photoRemind.unsubmittedTimers.push(t);
   }, game.photoRemind.interval * 60 * 1000);
+}
+
+// 写真アルバムスレッドの投稿履歴（画像添付）を見て、まだ提出していないチームだけに呼びかける
+async function remindUnsubmittedTeams(guild, game, photoThread) {
+  if (game.phase !== 'playing') return;
+
+  const submittedIds = new Set();
+  let before;
+  // スレッド作成〜現在までの全メッセージを遡って、画像を投稿した人を集計
+  for (let i = 0; i < 10; i++) {
+    const batch = await photoThread.messages.fetch({ limit: 100, before }).catch(() => null);
+    if (!batch || batch.size === 0) break;
+    batch.forEach((msg) => {
+      if (msg.attachments.size > 0) submittedIds.add(msg.author.id);
+    });
+    if (batch.size < 100) break;
+    before = batch.last().id;
+  }
+
+  const unsubmittedTeams = game.teams.runner.filter(
+    (team) => !team.discordIds.some((id) => submittedIds.has(id))
+  );
+  if (unsubmittedTeams.length === 0) return;
+
+  const mentions = unsubmittedTeams
+    .flatMap((team) => team.discordIds.map((id) => `<@${id}>`))
+    .join(' ');
+  if (!mentions) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(COLORS.PHOTO)
+    .setTitle('📸 写真未提出リマインド')
+    .setDescription('まだ写真が届いていません！まだの人は今すぐ投稿してください！');
+  await photoThread.send({ content: mentions, embeds: [embed] });
 }
 
 module.exports = { startMissionTimer, issueMission, startPhotoRemindTimer };

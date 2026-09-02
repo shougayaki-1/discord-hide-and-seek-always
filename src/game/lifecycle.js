@@ -9,9 +9,11 @@ function clearAllTimers(game) {
   if (game.gameTimer) clearTimeout(game.gameTimer);
   if (game.mission.timer) clearTimeout(game.mission.timer);
   if (game.photoRemind.timer) clearInterval(game.photoRemind.timer);
+  (game.photoRemind.unsubmittedTimers || []).forEach((t) => clearTimeout(t));
   game.gameTimer = null;
   game.mission.timer = null;
   game.photoRemind.timer = null;
+  game.photoRemind.unsubmittedTimers = [];
 }
 
 async function endGame(guild, channel, reason, game) {

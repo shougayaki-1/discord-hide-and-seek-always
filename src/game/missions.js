@@ -49,6 +49,14 @@ async function issueMission(guild, game) {
   await controlCh.send({ content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者', embeds: [embed] });
 }
 
+function formatTimeLabel() {
+  return new Date().toLocaleTimeString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function startPhotoRemindTimer(guild, game) {
   if (game.photoRemind.timer) return;
   game.photoRemind.timer = setInterval(async () => {
@@ -56,10 +64,15 @@ function startPhotoRemindTimer(guild, game) {
     if (!game.photoThreadId) return;
     const photoThread = await guild.channels.fetch(game.photoThreadId).catch(() => null);
     if (!photoThread) return;
+
+    game.photoRemind.round += 1;
+    const round = game.photoRemind.round;
+    const timeLabel = formatTimeLabel();
+
     const runnerRole = guild.roles.cache.find((r) => r.name === RUNNER_ROLE_NAME);
     const embed = new EmbedBuilder()
       .setColor(COLORS.PHOTO)
-      .setTitle('📸 写真提出リマインド')
+      .setTitle(`📸 写真提出リマインド（第${round}回 ${timeLabel}）`)
       .setDescription('現在地のヒントとなる写真をこのスレッドに投稿してください！');
     await photoThread.send({
       content: runnerRole ? `<@&${runnerRole.id}>` : '@逃走者',
@@ -69,14 +82,15 @@ function startPhotoRemindTimer(guild, game) {
     // 1分後、まだ写真を出していないチームだけに個別リマインド
     const t = setTimeout(async () => {
       game.photoRemind.unsubmittedTimers = game.photoRemind.unsubmittedTimers.filter((x) => x !== t);
-      await remindUnsubmittedTeams(guild, game, photoThread);
+      await remindUnsubmittedTeams(guild, game, photoThread, round, timeLabel);
     }, 60 * 1000);
     game.photoRemind.unsubmittedTimers.push(t);
   }, game.photoRemind.interval * 60 * 1000);
 }
 
 // 写真アルバムスレッドの投稿履歴（画像添付）を見て、まだ提出していないチームだけに呼びかける
-async function remindUnsubmittedTeams(guild, game, photoThread) {
+// （誰か1人でも写真を出したチームは、以降ずっと対象から外れる）
+async function remindUnsubmittedTeams(guild, game, photoThread, round, timeLabel) {
   if (game.phase !== 'playing') return;
 
   const submittedIds = new Set();
@@ -92,21 +106,30 @@ async function remindUnsubmittedTeams(guild, game, photoThread) {
     before = batch.last().id;
   }
 
-  const unsubmittedTeams = game.teams.runner.filter(
+  const totalTeams = game.teams.runner;
+  const unsubmittedTeams = totalTeams.filter(
     (team) => !team.discordIds.some((id) => submittedIds.has(id))
   );
   if (unsubmittedTeams.length === 0) return;
 
-  const mentions = unsubmittedTeams
-    .flatMap((team) => team.discordIds.map((id) => `<@${id}>`))
-    .join(' ');
-  if (!mentions) return;
+  const teamLines = unsubmittedTeams.map((team) => {
+    const index = totalTeams.indexOf(team) + 1;
+    const mentions = team.discordIds.map((id) => `<@${id}>`).join(' ');
+    return `🏃 **逃走者 ${index}班**: ${mentions || '(メンバーなし)'}`;
+  });
+  const missingMemberCount = unsubmittedTeams.reduce((sum, t) => sum + t.discordIds.length, 0);
+
+  const allMentions = unsubmittedTeams.flatMap((team) => team.discordIds.map((id) => `<@${id}>`)).join(' ');
 
   const embed = new EmbedBuilder()
     .setColor(COLORS.PHOTO)
-    .setTitle('📸 写真未提出リマインド')
-    .setDescription('まだ写真が届いていません！まだの人は今すぐ投稿してください！');
-  await photoThread.send({ content: mentions, embeds: [embed] });
+    .setTitle(`📸 写真未提出リマインド（${timeLabel} 第${round}回分）`)
+    .setDescription(
+      `**${totalTeams.length}班中 ${unsubmittedTeams.length}班（${missingMemberCount}人）が未提出です**\n\n${teamLines.join(
+        '\n'
+      )}\n\nまだの人は今すぐ投稿してください！`
+    );
+  await photoThread.send({ content: allMentions, embeds: [embed] });
 }
 
 module.exports = { startMissionTimer, issueMission, startPhotoRemindTimer };

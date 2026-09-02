@@ -189,6 +189,7 @@ async function setupTeamsAndChannels(guild, game) {
     message: { content: '今回の試合の写真・ミッション達成報告はこのスレッドに投稿してください！' },
   });
   game.photoThreadId = photoThread.id;
+  game.photoRemind.round = 0;
 
   // 鬼陣営チャンネル
   let oniText = findGameChannel(guild, game, CHANNELS.ONI_TEXT);

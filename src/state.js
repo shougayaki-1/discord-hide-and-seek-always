@@ -42,7 +42,7 @@ function getInitialGameStatus(keepChannels = false, oldStatus = null) {
         },
     photoRemind: oldStatus
       ? oldStatus.photoRemind
-      : { timer: null, interval: 5, unsubmittedTimers: [] },
+      : { timer: null, interval: 5, unsubmittedTimers: [], round: 0 },
   };
 }
 

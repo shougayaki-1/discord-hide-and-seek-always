@@ -76,26 +76,41 @@ async function performTeamShuffle(guild, game) {
 
   game.teams.oni = allTeams.slice(0, oniCount);
   game.teams.runner = allTeams.slice(oniCount);
-  // ディープコピーで初期編成を保存（Map/Set を含まないので JSON で安全）
-  game.initialTeams = JSON.parse(
-    JSON.stringify({ oni: game.teams.oni, runner: game.teams.runner })
-  );
 
   const oniRole = await getOrCreateRole(guild, ONI_ROLE_NAME, 'Red');
   const runnerRole = await getOrCreateRole(guild, RUNNER_ROLE_NAME, 'Blue');
+
+  // メンションではなく、サーバープロフィールの表示名（ニックネーム優先）を
+  // セレクトメニュー等の選択肢表示用に組み立てる（メンション記法はコンポーネント上では解決されないため）
+  const buildNameMembers = async (team) => {
+    const guestNames = team.displayMembers.filter((m) => m.startsWith('(ゲスト)'));
+    const names = [];
+    for (const id of team.discordIds) {
+      const m = await guild.members.fetch(id).catch(() => null);
+      names.push(m ? m.displayName : '不明なユーザー');
+    }
+    return [...names, ...guestNames];
+  };
 
   for (const team of game.teams.oni) {
     for (const dId of team.discordIds) {
       const m = await guild.members.fetch(dId).catch(() => null);
       if (m) await m.roles.add(oniRole).catch(() => {});
     }
+    team.nameMembers = await buildNameMembers(team);
   }
   for (const team of game.teams.runner) {
     for (const dId of team.discordIds) {
       const m = await guild.members.fetch(dId).catch(() => null);
       if (m) await m.roles.add(runnerRole).catch(() => {});
     }
+    team.nameMembers = await buildNameMembers(team);
   }
+
+  // ディープコピーで初期編成を保存（nameMembers も含める。Map/Set を含まないので JSON で安全）
+  game.initialTeams = JSON.parse(
+    JSON.stringify({ oni: game.teams.oni, runner: game.teams.runner })
+  );
 
   return { success: true, roles: { oniRole, runnerRole } };
 }

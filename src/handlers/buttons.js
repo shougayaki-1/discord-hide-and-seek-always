@@ -291,7 +291,7 @@ async function handleButton(interaction) {
     game.teams.runner.forEach((team, index) => {
       selectMenu.addOptions({
         label: `逃走者 ${index + 1}班`,
-        description: `メンバー: ${team.displayMembers.join(', ').substring(0, 50)}`,
+        description: `メンバー: ${(team.nameMembers || team.displayMembers).join(', ').substring(0, 50)}`,
         value: team.id,
       });
     });
@@ -311,14 +311,14 @@ async function handleButton(interaction) {
     game.teams.oni.forEach((t, i) =>
       selectMenu.addOptions({
         label: `👹鬼 ${i + 1}班`,
-        description: `メンバー: ${t.displayMembers.join(', ').substring(0, 50)}`,
+        description: `メンバー: ${(t.nameMembers || t.displayMembers).join(', ').substring(0, 50)}`,
         value: t.id,
       })
     );
     game.teams.runner.forEach((t, i) =>
       selectMenu.addOptions({
         label: `🏃逃走者 ${i + 1}班`,
-        description: `メンバー: ${t.displayMembers.join(', ').substring(0, 50)}`,
+        description: `メンバー: ${(t.nameMembers || t.displayMembers).join(', ').substring(0, 50)}`,
         value: t.id,
       })
     );

@@ -230,7 +230,7 @@ async function setupTeamsAndChannels(guild, game) {
     });
   }
 
-  game.createdChannelIds = [oniText.id, oniVC.id, runText.id, runVC.id];
+  game.createdChannelIds = [controlCh.id, oniText.id, oniVC.id, runText.id, runVC.id];
 
   await announceTeams(controlCh, game);
   await controlCh.send(
